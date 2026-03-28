@@ -1,0 +1,61 @@
+# Data (too large to commit)
+data/
+
+# Model outputs (generated during training)
+models/*.pkl
+!models/.gitkeep
+
+# Competition submissions
+submissions/*
+!submissions/.gitkeep
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# Temporary files
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
