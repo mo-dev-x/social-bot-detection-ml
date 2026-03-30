@@ -6,6 +6,7 @@ from src.model_training import (
     find_best_threshold,
     run_final_detection,
     save_submission,
+    train_all_languages,
     train_full_pipeline,
     train_lightgbm_model,
     validate_model,
@@ -19,6 +20,7 @@ __all__ = [
     "rules_engine",
     "run_final_detection",
     "save_submission",
+    "train_all_languages",
     "train_full_pipeline",
     "train_lightgbm_model",
     "validate_model",
@@ -26,8 +28,4 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    train_full_pipeline(
-        dataset_path="data/train_en/dataset.posts&users.json",
-        ground_truth_path="data/train_en/dataset.bots.txt",
-        language="en",
-    )
+    train_all_languages()

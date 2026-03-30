@@ -32,10 +32,18 @@ def test_data_paths():
     """Report whether the expected training files are available yet."""
     print("\n[TEST 2] Checking data paths...")
     required_paths = [
-        Path("data/train_en/dataset.posts&users.json"),
-        Path("data/train_en/dataset.bots.txt"),
-        Path("data/train_fr/dataset.posts&users.json"),
-        Path("data/train_fr/dataset.bots.txt"),
+        Path("data/training/dataset.posts&users.1.json"),
+        Path("data/training/dataset.bots.1.txt"),
+        Path("data/training/dataset.posts&users.2.json"),
+        Path("data/training/dataset.bots.2.txt"),
+        Path("data/training/dataset.posts&users.3.json"),
+        Path("data/training/dataset.bots.3.txt"),
+        Path("data/training/dataset.posts&users.4.json"),
+        Path("data/training/dataset.bots.4.txt"),
+        Path("data/training/dataset.posts&users.5.json"),
+        Path("data/training/dataset.bots.5.txt"),
+        Path("data/training/dataset.posts&users.6.json"),
+        Path("data/training/dataset.bots.6.txt"),
     ]
 
     missing = [path for path in required_paths if not path.exists()]
@@ -52,8 +60,8 @@ def test_data_paths():
 def test_feature_extraction():
     """Test that feature extraction works when data is present."""
     print("\n[TEST 3] Testing feature extraction...")
-    en_path = Path("data/train_en/dataset.posts&users.json")
-    fr_path = Path("data/train_fr/dataset.posts&users.json")
+    en_path = Path("data/training/dataset.posts&users.1.json")
+    fr_path = Path("data/training/dataset.posts&users.2.json")
     if not en_path.exists() or not fr_path.exists():
         print("   SKIP Feature extraction test waiting for datasets")
         return True
@@ -83,12 +91,16 @@ def test_rules_engine():
         row = pd.Series(
             {
                 "z_score": 3.0,
-                "cv_time_delta": 0.2,
+                "cv_time_delta": 0.1,
                 "duplicate_tweet_ratio": 0.5,
-                "avg_cosine_similarity": 0.95,
                 "hour_entropy": 0.1,
-                "tweets_per_day_avg": 25.0,
-                "max_tweets_in_10min": 30,
+                "tweets_per_hour": 25.0,
+                "tweet_count": 30,
+                "near_duplicate_ratio": 0.8,
+                "burst_ratio_1h": 0.5,
+                "cross_user_repost_ratio": 0.8,
+                "template_duplicate_ratio": 0.7,
+                "hour_uniform_chi2": 25.0,
             }
         )
         result = rules_engine(row)
@@ -121,8 +133,8 @@ def test_model_directory():
 def test_full_pipeline():
     """Test the complete training pipeline when English data is present."""
     print("\n[TEST 6] Testing full training pipeline...")
-    data_path = Path("data/train_en/dataset.posts&users.json")
-    truth_path = Path("data/train_en/dataset.bots.txt")
+    data_path = Path("data/training/dataset.posts&users.1.json")
+    truth_path = Path("data/training/dataset.bots.1.txt")
     if not data_path.exists() or not truth_path.exists():
         print("   SKIP Full pipeline test waiting for English dataset")
         return True

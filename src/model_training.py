@@ -2,58 +2,60 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from pathlib import Path
 
 import joblib
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupKFold
 
 from .feature_extraction import create_feature_dataframe
 from .rules_engine import rules_engine
-from .utils import ensure_directory
+from .utils import ensure_directory, load_json_dataset
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+DATASET_PATTERN = re.compile(r"dataset\.posts&users\.(\d+)\.json$")
+DEFAULT_DATASET_DIR = Path("data/training")
+
 
 def compute_competition_score(y_true, y_pred):
     """Official asymmetric competition score."""
-    tp = sum((y_true == 1) & (y_pred == 1))
-    fn = sum((y_true == 1) & (y_pred == 0))
-    fp = sum((y_true == 0) & (y_pred == 1))
+    y_true = np.asarray(y_true, dtype=int)
+    y_pred = np.asarray(y_pred, dtype=int)
+    tp = int(((y_pred == 1) & (y_true == 1)).sum())
+    fn = int(((y_pred == 0) & (y_true == 1)).sum())
+    fp = int(((y_pred == 1) & (y_true == 0)).sum())
+    tn = int(((y_pred == 0) & (y_true == 0)).sum())
     score = 2 * tp - 2 * fn - 6 * fp
     return {
-        "score": score,
+        "score": int(score),
         "tp": tp,
         "fn": fn,
         "fp": fp,
-        "tn": sum((y_true == 0) & (y_pred == 0)),
-        "precision": tp / (tp + fp) if (tp + fp) > 0 else 0,
-        "recall": tp / (tp + fn) if (tp + fn) > 0 else 0,
+        "tn": tn,
+        "precision": tp / (tp + fp) if (tp + fp) > 0 else 0.0,
+        "recall": tp / (tp + fn) if (tp + fn) > 0 else 0.0,
     }
 
 
-def train_lightgbm_model(X_train, y_train, language: str = "en"):
-    """Train the tabular classifier."""
-    if language == "fr":
-        n_estimators = 300
-        max_depth = 8
-    else:
-        n_estimators = 250
-        max_depth = 7
-
+def train_lightgbm_model(X_train, y_train, language: str = "multi"):
+    """Train the base classifier with conservative defaults."""
     logger.info("Training LightGBM model for %s", language.upper())
     model = lgb.LGBMClassifier(
-        num_leaves=31,
-        max_depth=max_depth,
+        n_estimators=180 if language == "en" else 160,
         learning_rate=0.05,
-        n_estimators=n_estimators,
+        num_leaves=31,
+        min_child_samples=25,
+        min_split_gain=0.05,
+        reg_lambda=1.5,
         subsample=0.9,
         colsample_bytree=0.9,
-        is_unbalance=True,
         random_state=42,
         verbose=-1,
         n_jobs=-1,
@@ -62,39 +64,55 @@ def train_lightgbm_model(X_train, y_train, language: str = "en"):
     return model
 
 
-def find_best_threshold(y_true, y_probs):
-    """Search thresholds for the best competition score."""
-    thresholds = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
+def apply_safety_layer(features_df, probabilities, threshold):
+    """Combine model confidence with strict high-precision rules."""
+    rule_flags = features_df.apply(rules_engine, axis=1).to_numpy(dtype=bool)
+    preds = ((np.asarray(probabilities) >= threshold) | rule_flags).astype(int)
+    return preds, rule_flags.astype(int)
+
+
+def find_best_threshold(y_true, y_probs, feature_frame):
+    """Search thresholds using the competition score and safety rules."""
+    thresholds = np.linspace(0.50, 0.99, 100)
     results = []
     for threshold in thresholds:
-        y_pred = (y_probs >= threshold).astype(int)
+        y_pred, rule_flags = apply_safety_layer(feature_frame, y_probs, threshold)
         score_dict = compute_competition_score(y_true, y_pred)
-        results.append({"threshold": threshold, **score_dict})
-
-    results = sorted(results, key=lambda item: item["score"], reverse=True)
-    print("\n=== THRESHOLD TUNING RESULTS ===")
-    print(f"{'Threshold':<10} {'Score':<10} {'Precision':<10} {'Recall':<10} {'TP':<6} {'FN':<6} {'FP':<6}")
-    print("-" * 60)
-    for result in results:
-        print(
-            f"{result['threshold']:<10.2f} {result['score']:<10.0f} "
-            f"{result['precision']:<10.2f} {result['recall']:<10.2f} "
-            f"{result['tp']:<6} {result['fn']:<6} {result['fp']:<6}"
+        results.append(
+            {
+                "threshold": float(threshold),
+                "rule_flags": int(rule_flags.sum()),
+                **score_dict,
+            }
         )
 
+    results.sort(key=lambda item: (item["score"], item["precision"], -item["fp"]), reverse=True)
     best = results[0]
-    print(f"\nBest threshold: {best['threshold']:.2f} (Score: {best['score']:.0f})")
-    return best["threshold"]
+    print("\n=== THRESHOLD TUNING RESULTS (TOP 10) ===")
+    print(f"{'Threshold':<10} {'Score':<8} {'Precision':<10} {'Recall':<8} {'TP':<4} {'FN':<4} {'FP':<4}")
+    print("-" * 62)
+    for result in results[:10]:
+        print(
+            f"{result['threshold']:<10.2f} {result['score']:<8} "
+            f"{result['precision']:<10.2f} {result['recall']:<8.2f} "
+            f"{result['tp']:<4} {result['fn']:<4} {result['fp']:<4}"
+        )
+    print(f"\nBest threshold: {best['threshold']:.2f} (Score: {best['score']})")
+    return best["threshold"], pd.DataFrame(results)
 
 
-def validate_model(model, X_val, y_val, threshold: float = 0.85):
-    """Score the model on validation data."""
-    probs = model.predict_proba(X_val)[:, 1]
-    preds = (probs >= threshold).astype(int)
+def validate_model(model, X_val, y_val, threshold: float = 0.85, feature_frame=None):
+    """Score the model using the conservative safety layer."""
+    probabilities = model.predict_proba(X_val)[:, 1]
+    if feature_frame is None:
+        raise ValueError("feature_frame is required for safety-layer validation.")
+
+    preds, rule_flags = apply_safety_layer(feature_frame, probabilities, threshold)
     score_dict = compute_competition_score(y_val, preds)
     print("\n=== VALIDATION RESULTS ===")
     print(f"Decision Threshold: {threshold:.2f}")
-    print(f"Competition Score: {score_dict['score']:.0f}")
+    print(f"Rules approved: {int(rule_flags.sum())}")
+    print(f"Competition Score: {score_dict['score']}")
     print(f"True Positives: {score_dict['tp']}")
     print(f"False Negatives: {score_dict['fn']}")
     print(f"False Positives: {score_dict['fp']}")
@@ -105,116 +123,280 @@ def validate_model(model, X_val, y_val, threshold: float = 0.85):
 
 
 def analyze_feature_importance(model, X_train):
-    """Print and return ranked feature importance."""
+    """Return ranked feature importance."""
     feature_importance_df = pd.DataFrame(
         {"feature": X_train.columns, "importance": model.feature_importances_}
     ).sort_values("importance", ascending=False)
-    print("\n=== TOP 20 FEATURES ===")
-    print(feature_importance_df.head(20))
+    print("\n=== TOP FEATURES ===")
+    print(feature_importance_df.head(15))
     return feature_importance_df
 
 
-def train_full_pipeline(dataset_path, ground_truth_path, language: str = "en", models_dir: str = "models"):
-    """Train, tune, validate, and persist a language-specific model."""
-    logger.info("Starting training pipeline for %s", language.upper())
+def summarize_rules(feature_frame, labels):
+    """Summarize standalone rule behavior on labeled data."""
+    flags = feature_frame.apply(rules_engine, axis=1).astype(int).to_numpy()
+    score = compute_competition_score(labels, flags)
+    return {
+        "flags": int(flags.sum()),
+        **score,
+    }
+
+
+def select_feature_columns(training_df, excluded_columns):
+    """Drop dead or near-constant features before training."""
+    candidate_columns = [column for column in training_df.columns if column not in excluded_columns]
+    variances = training_df[candidate_columns].var(numeric_only=True)
+    kept_columns = variances[variances > 1e-8].index.tolist()
+    dropped_columns = variances[variances <= 1e-8].index.tolist()
+    return kept_columns, dropped_columns
+
+
+def _discover_dataset_specs(dataset_dir: str | Path = DEFAULT_DATASET_DIR):
+    dataset_dir = Path(dataset_dir)
+    specs = []
+    for json_path in sorted(dataset_dir.glob("dataset.posts&users.*.json")):
+        match = DATASET_PATTERN.search(json_path.name)
+        if not match:
+            continue
+        dataset_id = match.group(1)
+        labels_path = dataset_dir / f"dataset.bots.{dataset_id}.txt"
+        if not labels_path.exists():
+            logger.warning("Skipping %s because %s is missing", json_path.name, labels_path.name)
+            continue
+
+        payload = load_json_dataset(json_path)
+        specs.append(
+            {
+                "dataset_id": dataset_id,
+                "batch_id": payload.get("id", dataset_id),
+                "language": payload.get("lang", "en"),
+                "dataset_path": json_path,
+                "ground_truth_path": labels_path,
+            }
+        )
+    return specs
+
+
+def _load_bot_ids(ground_truth_path: str | Path):
+    return {line.strip() for line in Path(ground_truth_path).read_text(encoding="utf-8").splitlines() if line.strip()}
+
+
+def build_training_dataframe(dataset_specs=None, dataset_dir: str | Path = DEFAULT_DATASET_DIR):
+    """Aggregate all labeled datasets into one user-level table."""
+    dataset_specs = dataset_specs or _discover_dataset_specs(dataset_dir)
+    if not dataset_specs:
+        raise FileNotFoundError("No labeled datasets were found.")
+
+    frames = []
+    for spec in dataset_specs:
+        features_df = create_feature_dataframe(spec["dataset_path"], language=spec["language"])
+        bot_ids = _load_bot_ids(spec["ground_truth_path"])
+        features_df["label"] = features_df["user_id"].isin(bot_ids).astype(int)
+        features_df["batch_id"] = str(spec["batch_id"])
+        features_df["language"] = spec["language"]
+        features_df["dataset_id"] = str(spec["dataset_id"])
+        frames.append(features_df)
+
+    training_df = pd.concat(frames, ignore_index=True)
+    training_df = training_df.fillna(0)
+    return training_df, dataset_specs
+
+
+def _align_feature_columns(features_df, feature_names):
+    aligned = features_df.reindex(columns=feature_names, fill_value=0)
+    return aligned.replace([np.inf, -np.inf], 0).fillna(0)
+
+
+def _cross_batch_validate(X, y, groups, feature_frame, language):
+    unique_groups = pd.Series(groups).nunique()
+    if unique_groups < 2:
+        raise ValueError("GroupKFold requires at least two distinct batches.")
+
+    splitter = GroupKFold(n_splits=min(5, unique_groups))
+    oof_probs = np.zeros(len(X), dtype=float)
+    fold_reports = []
+
+    for fold_idx, (train_idx, val_idx) in enumerate(splitter.split(X, y, groups=groups), start=1):
+        train_groups = sorted(set(groups.iloc[train_idx]))
+        val_groups = sorted(set(groups.iloc[val_idx]))
+        print(f"\n=== FOLD {fold_idx} ===")
+        print(f"Train batches: {train_groups}")
+        print(f"Validate batches: {val_groups}")
+
+        model = train_lightgbm_model(X.iloc[train_idx], y.iloc[train_idx], language=language)
+        probs = model.predict_proba(X.iloc[val_idx])[:, 1]
+        oof_probs[val_idx] = probs
+
+        threshold, _ = find_best_threshold(y.iloc[val_idx], probs, feature_frame.iloc[val_idx].reset_index(drop=True))
+        preds, _ = apply_safety_layer(feature_frame.iloc[val_idx].reset_index(drop=True), probs, threshold)
+        report = compute_competition_score(y.iloc[val_idx], preds)
+        report["fold"] = fold_idx
+        report["threshold"] = threshold
+        report["train_batches"] = train_groups
+        report["val_batches"] = val_groups
+        fold_reports.append(report)
+        print(
+            f"Fold {fold_idx} score={report['score']} precision={report['precision']:.2%} "
+            f"recall={report['recall']:.2%} fp={report['fp']}"
+        )
+
+    return oof_probs, pd.DataFrame(fold_reports)
+
+
+def train_full_pipeline(dataset_path=None, ground_truth_path=None, language: str | None = None, models_dir: str = "models"):
+    """Train one language-specific model and persist the resulting artifacts."""
+    del dataset_path, ground_truth_path
+
+    if not language:
+        raise ValueError("train_full_pipeline now requires language='en' or language='fr'.")
+
     print(f"\n{'=' * 60}")
     print(f"TRAINING PIPELINE: {language.upper()}")
     print(f"{'=' * 60}")
 
-    print(f"\n1. Loading dataset: {dataset_path}")
-    features_df = create_feature_dataframe(dataset_path, language=language)
-    logger.info("Feature dataframe shape for %s: %s", language.upper(), features_df.shape)
-    print(f"   -> Extracted features for {len(features_df)} users")
-    print(f"   -> {len(features_df.columns)} columns")
+    training_df, dataset_specs = build_training_dataframe()
+    training_df = training_df.loc[training_df["language"] == language].reset_index(drop=True)
+    dataset_specs = [spec for spec in dataset_specs if spec["language"] == language]
+    if training_df.empty:
+        raise ValueError(f"No datasets found for language={language!r}")
 
-    print(f"\n2. Loading ground truth: {ground_truth_path}")
-    with Path(ground_truth_path).open("r", encoding="utf-8") as handle:
-        bot_ids = {int(line.strip()) for line in handle if line.strip()}
+    print("\n1. Labeled datasets")
+    for spec in dataset_specs:
+        print(f"   -> batch={spec['batch_id']} lang={spec['language']} file={Path(spec['dataset_path']).name}")
 
-    features_df["label"] = features_df["user_id"].isin(bot_ids).astype(int)
-    print(f"   -> {features_df['label'].sum()} positive labels")
+    print("\n2. User-level training table")
+    print(f"   -> Rows: {len(training_df)}")
+    print(f"   -> Bots: {int(training_df['label'].sum())}")
+    print(f"   -> Batches: {sorted(training_df['batch_id'].unique().tolist())}")
 
-    print(f"\n3. Splitting train/val (70/30)")
-    X = features_df.drop(["user_id", "label"], axis=1)
-    y = features_df["label"]
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.3, random_state=42, stratify=y
+    feature_columns, dropped_features = select_feature_columns(
+        training_df,
+        excluded_columns={"user_id", "label", "batch_id", "language", "dataset_id"},
     )
-    print(f"   -> Train: {len(X_train)} ({y_train.sum()} bots)")
-    print(f"   -> Val: {len(X_val)} ({y_val.sum()} bots)")
+    X = training_df[feature_columns]
+    y = training_df["label"]
+    groups = training_df["batch_id"]
+    feature_frame = training_df[feature_columns]
 
-    print(f"\n4. Training LightGBM model")
-    model = train_lightgbm_model(X_train, y_train, language=language)
-    print("   -> Model trained")
+    if dropped_features:
+        print(f"   -> Dropped near-constant features: {', '.join(dropped_features)}")
 
-    print(f"\n5. Feature importance")
-    feature_importance = analyze_feature_importance(model, X_train)
+    print("\n3. Cross-batch validation with GroupKFold")
+    oof_probs, fold_report_df = _cross_batch_validate(X, y, groups, feature_frame, language=language)
 
-    print(f"\n6. Finding optimal threshold")
-    probs_val = model.predict_proba(X_val)[:, 1]
-    best_threshold = find_best_threshold(y_val, probs_val)
+    print("\n4. Threshold search on out-of-fold predictions")
+    best_threshold, threshold_report = find_best_threshold(y, oof_probs, feature_frame)
+    oof_preds, rule_flags = apply_safety_layer(feature_frame, oof_probs, best_threshold)
+    oof_results = compute_competition_score(y, oof_preds)
+    print(
+        f"   -> OOF score={oof_results['score']} precision={oof_results['precision']:.2%} "
+        f"recall={oof_results['recall']:.2%} fp={oof_results['fp']} rules={int(rule_flags.sum())}"
+    )
+    rules_summary = summarize_rules(feature_frame, y)
+    print(
+        f"   -> Rules alone score={rules_summary['score']} precision={rules_summary['precision']:.2%} "
+        f"recall={rules_summary['recall']:.2%} fp={rules_summary['fp']}"
+    )
 
-    print(f"\n7. Validating model")
-    val_results = validate_model(model, X_val, y_val, threshold=best_threshold)
+    print("\n5. Training final model on all labeled users")
+    model = train_lightgbm_model(X, y, language=language)
+    feature_importance = analyze_feature_importance(model, X)
 
     target_dir = ensure_directory(models_dir)
+    bundle = {
+        "model": model,
+        "feature_names": feature_columns,
+        "language": language,
+        "batches": sorted(training_df["batch_id"].unique().tolist()),
+    }
+
     model_path = target_dir / f"model_{language}.pkl"
     threshold_path = target_dir / f"threshold_{language}.pkl"
+    report_path = target_dir / f"training_report_{language}.json"
 
-    print(f"\n8. Saving model")
-    joblib.dump(model, model_path)
-    print(f"   -> Model saved to {model_path}")
-
-    print(f"\n9. Saving threshold")
+    print("\n6. Saving model artifacts")
+    joblib.dump(bundle, model_path)
     joblib.dump(best_threshold, threshold_path)
-    print(f"   -> Threshold saved to {threshold_path}")
+    report_path.write_text(
+        json.dumps(
+            {
+                "language": language,
+                "datasets": [
+                    {
+                        "batch_id": spec["batch_id"],
+                        "language": spec["language"],
+                        "dataset_path": str(spec["dataset_path"]),
+                        "ground_truth_path": str(spec["ground_truth_path"]),
+                    }
+                    for spec in dataset_specs
+                ],
+                "oof_results": oof_results,
+                "rules_summary": rules_summary,
+                "best_threshold": best_threshold,
+                "dropped_features": dropped_features,
+                "fold_reports": fold_report_df.to_dict(orient="records"),
+                "threshold_candidates_top10": threshold_report.head(10).to_dict(orient="records"),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"   -> Model: {model_path}")
+    print(f"   -> Threshold: {threshold_path}")
+    print(f"   -> Report: {report_path}")
 
     return {
         "model": model,
         "threshold": best_threshold,
-        "val_results": val_results,
+        "val_results": oof_results,
         "feature_importance": feature_importance,
-        "feature_names": X_train.columns.tolist(),
+        "feature_names": feature_columns,
+        "fold_reports": fold_report_df,
+        "rule_flags": rule_flags,
+    }
+
+
+def train_all_languages(models_dir: str = "models"):
+    """Train both language-specific models."""
+    return {
+        "en": train_full_pipeline(language="en", models_dir=models_dir),
+        "fr": train_full_pipeline(language="fr", models_dir=models_dir),
     }
 
 
 def run_final_detection(dataset_path, language: str = "en", model_path=None, threshold_path=None):
     """Run inference on an unlabeled evaluation dataset."""
-    model_path = model_path or f"models/model_{language}.pkl"
-    threshold_path = threshold_path or f"models/threshold_{language}.pkl"
-    logger.info("Running final detection for %s", language.upper())
+    model_path = Path(model_path or f"models/model_{language}.pkl")
+    threshold_path = Path(threshold_path or f"models/threshold_{language}.pkl")
 
     print(f"\n{'=' * 60}")
     print(f"FINAL DETECTION: {language.upper()}")
     print(f"{'=' * 60}")
 
+    dataset = load_json_dataset(dataset_path)
+    dataset_language = language or dataset.get("lang", "en")
+
     print(f"\n1. Loading dataset: {dataset_path}")
-    features_df = create_feature_dataframe(dataset_path, language=language)
-    logger.info("Inference feature dataframe shape for %s: %s", language.upper(), features_df.shape)
+    features_df = create_feature_dataframe(dataset_path, language=dataset_language)
     print(f"   -> Features extracted for {len(features_df)} users")
 
     print(f"\n2. Loading model: {model_path}")
-    model = joblib.load(model_path)
-    print("   -> Model loaded")
-
-    print(f"\n3. Loading threshold: {threshold_path}")
+    bundle = joblib.load(model_path)
     threshold = joblib.load(threshold_path)
+    feature_names = bundle["feature_names"]
+    model = bundle["model"]
     print(f"   -> Threshold: {threshold:.2f}")
 
-    print(f"\n4. Generating predictions")
-    X = features_df.drop("user_id", axis=1)
-    probs = model.predict_proba(X)[:, 1]
-    ml_preds = (probs >= threshold).astype(int)
+    X = _align_feature_columns(features_df.drop(columns=["user_id"]), feature_names)
+    probabilities = model.predict_proba(X)[:, 1]
+    preds, rule_flags = apply_safety_layer(X, probabilities, threshold)
+    flagged_users = features_df.loc[preds == 1, "user_id"].tolist()
 
-    print(f"\n5. Applying rules engine")
-    rules_flags = features_df.apply(rules_engine, axis=1).astype(int)
-    combined_preds = np.maximum(ml_preds, rules_flags.to_numpy())
-
-    flagged_users = features_df.loc[combined_preds == 1, "user_id"].tolist()
-    print(f"   -> ML model flagged: {int(ml_preds.sum())} users")
-    print(f"   -> Rules flagged: {int(rules_flags.sum())} users")
-    print(f"   -> Combined flagged: {len(flagged_users)} users")
-    return flagged_users, probs, features_df
+    print(f"\n3. Applying safety layer")
+    print(f"   -> Above threshold: {int((probabilities >= threshold).sum())}")
+    print(f"   -> Rule-approved: {int(rule_flags.sum())}")
+    print(f"   -> Final flagged: {len(flagged_users)}")
+    return flagged_users, probabilities, features_df
 
 
 def save_submission(flagged_user_ids, team_name, language, output_dir="."):
@@ -230,13 +412,4 @@ def save_submission(flagged_user_ids, team_name, language, output_dir="."):
 
 
 if __name__ == "__main__":
-    train_full_pipeline(
-        dataset_path="data/train_en/dataset.posts&users.json",
-        ground_truth_path="data/train_en/dataset.bots.txt",
-        language="en",
-    )
-    train_full_pipeline(
-        dataset_path="data/train_fr/dataset.posts&users.json",
-        ground_truth_path="data/train_fr/dataset.bots.txt",
-        language="fr",
-    )
+    train_all_languages()

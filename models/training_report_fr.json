@@ -1,0 +1,214 @@
+{
+  "language": "fr",
+  "datasets": [
+    {
+      "batch_id": 2,
+      "language": "fr",
+      "dataset_path": "data\\training\\dataset.posts&users.2.json",
+      "ground_truth_path": "data\\training\\dataset.bots.2.txt"
+    },
+    {
+      "batch_id": 4,
+      "language": "fr",
+      "dataset_path": "data\\training\\dataset.posts&users.4.json",
+      "ground_truth_path": "data\\training\\dataset.bots.4.txt"
+    },
+    {
+      "batch_id": 6,
+      "language": "fr",
+      "dataset_path": "data\\training\\dataset.posts&users.6.json",
+      "ground_truth_path": "data\\training\\dataset.bots.6.txt"
+    }
+  ],
+  "oof_results": {
+    "score": 30,
+    "tp": 55,
+    "fn": 28,
+    "fp": 4,
+    "tn": 539,
+    "precision": 0.9322033898305084,
+    "recall": 0.6626506024096386
+  },
+  "rules_summary": {
+    "flags": 0,
+    "score": -166,
+    "tp": 0,
+    "fn": 83,
+    "fp": 0,
+    "tn": 543,
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "best_threshold": 0.5,
+  "dropped_features": [
+    "tweet_count_gap_ratio"
+  ],
+  "fold_reports": [
+    {
+      "score": -10,
+      "tp": 16,
+      "fn": 12,
+      "fp": 3,
+      "tn": 252,
+      "precision": 0.8421052631578947,
+      "recall": 0.5714285714285714,
+      "fold": 1,
+      "threshold": 0.5,
+      "train_batches": [
+        "2",
+        "4"
+      ],
+      "val_batches": [
+        "6"
+      ]
+    },
+    {
+      "score": 36,
+      "tp": 23,
+      "fn": 5,
+      "fp": 0,
+      "tn": 144,
+      "precision": 1.0,
+      "recall": 0.8214285714285714,
+      "fold": 2,
+      "threshold": 0.6237373737373737,
+      "train_batches": [
+        "2",
+        "6"
+      ],
+      "val_batches": [
+        "4"
+      ]
+    },
+    {
+      "score": 10,
+      "tp": 16,
+      "fn": 11,
+      "fp": 0,
+      "tn": 144,
+      "precision": 1.0,
+      "recall": 0.5925925925925926,
+      "fold": 3,
+      "threshold": 0.5,
+      "train_batches": [
+        "4",
+        "6"
+      ],
+      "val_batches": [
+        "2"
+      ]
+    }
+  ],
+  "threshold_candidates_top10": [
+    {
+      "threshold": 0.5,
+      "rule_flags": 0,
+      "score": 30,
+      "tp": 55,
+      "fn": 28,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9322033898305084,
+      "recall": 0.6626506024096386
+    },
+    {
+      "threshold": 0.5049494949494949,
+      "rule_flags": 0,
+      "score": 30,
+      "tp": 55,
+      "fn": 28,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9322033898305084,
+      "recall": 0.6626506024096386
+    },
+    {
+      "threshold": 0.5098989898989899,
+      "rule_flags": 0,
+      "score": 30,
+      "tp": 55,
+      "fn": 28,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9322033898305084,
+      "recall": 0.6626506024096386
+    },
+    {
+      "threshold": 0.5148484848484849,
+      "rule_flags": 0,
+      "score": 30,
+      "tp": 55,
+      "fn": 28,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9322033898305084,
+      "recall": 0.6626506024096386
+    },
+    {
+      "threshold": 0.5197979797979798,
+      "rule_flags": 0,
+      "score": 30,
+      "tp": 55,
+      "fn": 28,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9322033898305084,
+      "recall": 0.6626506024096386
+    },
+    {
+      "threshold": 0.5247474747474747,
+      "rule_flags": 0,
+      "score": 30,
+      "tp": 55,
+      "fn": 28,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9322033898305084,
+      "recall": 0.6626506024096386
+    },
+    {
+      "threshold": 0.5296969696969697,
+      "rule_flags": 0,
+      "score": 30,
+      "tp": 55,
+      "fn": 28,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9322033898305084,
+      "recall": 0.6626506024096386
+    },
+    {
+      "threshold": 0.5346464646464646,
+      "rule_flags": 0,
+      "score": 30,
+      "tp": 55,
+      "fn": 28,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9322033898305084,
+      "recall": 0.6626506024096386
+    },
+    {
+      "threshold": 0.5395959595959596,
+      "rule_flags": 0,
+      "score": 26,
+      "tp": 54,
+      "fn": 29,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9310344827586207,
+      "recall": 0.6506024096385542
+    },
+    {
+      "threshold": 0.5445454545454546,
+      "rule_flags": 0,
+      "score": 26,
+      "tp": 54,
+      "fn": 29,
+      "fp": 4,
+      "tn": 539,
+      "precision": 0.9310344827586207,
+      "recall": 0.6506024096385542
+    }
+  ]
+}
