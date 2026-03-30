@@ -47,36 +47,56 @@ def compute_competition_score(y_true, y_pred):
 def train_lightgbm_model(X_train, y_train, language: str = "multi"):
     """Train the base classifier with conservative defaults."""
     logger.info("Training LightGBM model for %s", language.upper())
-    model = lgb.LGBMClassifier(
-        n_estimators=180 if language == "en" else 160,
-        learning_rate=0.05,
-        num_leaves=31,
-        min_child_samples=25,
-        min_split_gain=0.05,
-        reg_lambda=1.5,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        random_state=42,
-        verbose=-1,
-        n_jobs=-1,
-    )
+    if language == "fr":
+        model = lgb.LGBMClassifier(
+            n_estimators=160,
+            learning_rate=0.05,
+            num_leaves=24,
+            min_child_samples=15,
+            min_split_gain=0.05,
+            reg_lambda=2.0,
+            subsample=0.85,
+            colsample_bytree=0.85,
+            class_weight="balanced",
+            random_state=42,
+            verbose=-1,
+            n_jobs=-1,
+        )
+    else:
+        model = lgb.LGBMClassifier(
+            n_estimators=180,
+            learning_rate=0.05,
+            num_leaves=31,
+            min_child_samples=25,
+            min_split_gain=0.05,
+            reg_lambda=1.5,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            random_state=42,
+            verbose=-1,
+            n_jobs=-1,
+        )
     model.fit(X_train, y_train)
     return model
 
 
-def apply_safety_layer(features_df, probabilities, threshold):
+def apply_safety_layer(features_df, probabilities, threshold, language: str | None = None):
     """Combine model confidence with strict high-precision rules."""
-    rule_flags = features_df.apply(rules_engine, axis=1).to_numpy(dtype=bool)
+    rule_frame = features_df.copy()
+    if language:
+        rule_frame["_language"] = language
+    rule_flags = rule_frame.apply(rules_engine, axis=1).to_numpy(dtype=bool)
     preds = ((np.asarray(probabilities) >= threshold) | rule_flags).astype(int)
     return preds, rule_flags.astype(int)
 
 
-def find_best_threshold(y_true, y_probs, feature_frame):
+def find_best_threshold(y_true, y_probs, feature_frame, language: str = "en"):
     """Search thresholds using the competition score and safety rules."""
-    thresholds = np.linspace(0.50, 0.99, 100)
+    low = 0.30 if language == "fr" else 0.50
+    thresholds = np.linspace(low, 0.99, 140)
     results = []
     for threshold in thresholds:
-        y_pred, rule_flags = apply_safety_layer(feature_frame, y_probs, threshold)
+        y_pred, rule_flags = apply_safety_layer(feature_frame, y_probs, threshold, language=language)
         score_dict = compute_competition_score(y_true, y_pred)
         results.append(
             {
@@ -132,9 +152,12 @@ def analyze_feature_importance(model, X_train):
     return feature_importance_df
 
 
-def summarize_rules(feature_frame, labels):
+def summarize_rules(feature_frame, labels, language: str | None = None):
     """Summarize standalone rule behavior on labeled data."""
-    flags = feature_frame.apply(rules_engine, axis=1).astype(int).to_numpy()
+    rule_frame = feature_frame.copy()
+    if language:
+        rule_frame["_language"] = language
+    flags = rule_frame.apply(rules_engine, axis=1).astype(int).to_numpy()
     score = compute_competition_score(labels, flags)
     return {
         "flags": int(flags.sum()),
@@ -227,8 +250,18 @@ def _cross_batch_validate(X, y, groups, feature_frame, language):
         probs = model.predict_proba(X.iloc[val_idx])[:, 1]
         oof_probs[val_idx] = probs
 
-        threshold, _ = find_best_threshold(y.iloc[val_idx], probs, feature_frame.iloc[val_idx].reset_index(drop=True))
-        preds, _ = apply_safety_layer(feature_frame.iloc[val_idx].reset_index(drop=True), probs, threshold)
+        threshold, _ = find_best_threshold(
+            y.iloc[val_idx],
+            probs,
+            feature_frame.iloc[val_idx].reset_index(drop=True),
+            language=language,
+        )
+        preds, _ = apply_safety_layer(
+            feature_frame.iloc[val_idx].reset_index(drop=True),
+            probs,
+            threshold,
+            language=language,
+        )
         report = compute_competition_score(y.iloc[val_idx], preds)
         report["fold"] = fold_idx
         report["threshold"] = threshold
@@ -285,14 +318,14 @@ def train_full_pipeline(dataset_path=None, ground_truth_path=None, language: str
     oof_probs, fold_report_df = _cross_batch_validate(X, y, groups, feature_frame, language=language)
 
     print("\n4. Threshold search on out-of-fold predictions")
-    best_threshold, threshold_report = find_best_threshold(y, oof_probs, feature_frame)
-    oof_preds, rule_flags = apply_safety_layer(feature_frame, oof_probs, best_threshold)
+    best_threshold, threshold_report = find_best_threshold(y, oof_probs, feature_frame, language=language)
+    oof_preds, rule_flags = apply_safety_layer(feature_frame, oof_probs, best_threshold, language=language)
     oof_results = compute_competition_score(y, oof_preds)
     print(
         f"   -> OOF score={oof_results['score']} precision={oof_results['precision']:.2%} "
         f"recall={oof_results['recall']:.2%} fp={oof_results['fp']} rules={int(rule_flags.sum())}"
     )
-    rules_summary = summarize_rules(feature_frame, y)
+    rules_summary = summarize_rules(feature_frame, y, language=language)
     print(
         f"   -> Rules alone score={rules_summary['score']} precision={rules_summary['precision']:.2%} "
         f"recall={rules_summary['recall']:.2%} fp={rules_summary['fp']}"
@@ -389,7 +422,7 @@ def run_final_detection(dataset_path, language: str = "en", model_path=None, thr
 
     X = _align_feature_columns(features_df.drop(columns=["user_id"]), feature_names)
     probabilities = model.predict_proba(X)[:, 1]
-    preds, rule_flags = apply_safety_layer(X, probabilities, threshold)
+    preds, rule_flags = apply_safety_layer(X, probabilities, threshold, language=dataset_language)
     flagged_users = features_df.loc[preds == 1, "user_id"].tolist()
 
     print(f"\n3. Applying safety layer")

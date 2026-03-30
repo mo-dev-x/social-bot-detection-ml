@@ -73,6 +73,7 @@ class FeatureExtractor:
             "min_time_delta": 0.0,
             "max_time_delta": 0.0,
             "cv_time_delta": 0.0,
+            "periodic_interval_ratio": 0.0,
             "hour_entropy": 0.0,
             "hour_uniform_chi2": 0.0,
             "night_activity_ratio": 0.0,
@@ -105,6 +106,7 @@ class FeatureExtractor:
         base["min_time_delta"] = float(np.min(deltas))
         base["max_time_delta"] = float(np.max(deltas))
         base["cv_time_delta"] = safe_divide(base["std_time_delta"], base["mean_time_delta"])
+        base["periodic_interval_ratio"] = self._periodic_interval_ratio(deltas)
         base["tweets_per_hour"] = safe_divide(len(timestamps), span_seconds / 3600.0)
         base["burst_ratio_1h"] = safe_divide(self._max_tweets_in_window(timestamps, 3600), len(timestamps))
         return base
@@ -125,6 +127,7 @@ class FeatureExtractor:
             "template_duplicate_ratio": 0.0,
             "template_top_ratio": 0.0,
             "cross_user_repost_ratio": 0.0,
+            "top10_word_concentration": 0.0,
         }
 
         if not texts:
@@ -143,6 +146,9 @@ class FeatureExtractor:
         base["std_tweet_length"] = float(np.std(tweet_lengths))
         base["type_token_ratio"] = safe_divide(len(unique_tokens), len(all_tokens))
         base["unique_words_ratio"] = safe_divide(len(unique_tokens), len(texts))
+        if len(all_tokens) >= 20:
+            top10_count = sum(count for _, count in Counter(all_tokens).most_common(10))
+            base["top10_word_concentration"] = safe_divide(top10_count, len(all_tokens))
         base["duplicate_tweet_ratio"] = 1.0 - safe_divide(len(unique_texts), len(normalized_texts))
         base["template_duplicate_ratio"] = 1.0 - safe_divide(len(template_counter), len(templates))
         base["template_top_ratio"] = safe_divide(max(template_counter.values()), len(templates)) if template_counter else 0.0
@@ -232,6 +238,19 @@ class FeatureExtractor:
         return float(
             sum(((counts.get(hour, 0) - expected) ** 2) / expected for hour in range(24) if expected > 0)
         )
+
+    @staticmethod
+    def _periodic_interval_ratio(deltas: np.ndarray) -> float:
+        if len(deltas) < 4:
+            return 0.0
+
+        median_delta = float(np.median(deltas))
+        if median_delta <= 0:
+            return 0.0
+
+        residuals = np.mod(deltas, median_delta)
+        mirrored = np.minimum(residuals, np.abs(median_delta - residuals))
+        return float(np.mean(mirrored <= (0.15 * median_delta)))
 
 
 def create_feature_dataframe(dataset_filepath, language: str = "en"):
