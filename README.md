@@ -51,12 +51,10 @@ The `src/` package is the source of truth. Root-level Python files are convenien
 
 ## Documentation
 
-The project docs live in `documentation/`:
+The project docs are linked here for quick access:
 
-- `documentation/ARCHITECTURE_DECISIONS.md`
-  - records the architectural choices behind the approach
-- `documentation/PROJECT_TRACKER.md`
-  - tracks progress, validation phases, and remaining competition work
+- [Architecture decisions](documentation/ARCHITECTURE_DECISIONS.md) records the architectural choices behind the approach.
+- [Project tracker](documentation/PROJECT_TRACKER.md) tracks progress, validation phases, remaining competition work, and archived French-model follow-up notes.
 
 If you want the repo narrative first, start there before reading the code.
 
@@ -222,8 +220,6 @@ Each file contains one user ID per line.
 
 ## Current status
 
-- The codebase is aligned with the real dataset schema.
 - The training and validation scripts run successfully against the current repo layout.
 - The final validated cross-batch results are `188` for English and `80` for French.
-- The current submission path has been dry-run successfully with the saved model artifacts and thresholds.
 - The documentation folder reflects the final shipped approach; rejected experiments are documented in `documentation/ARCHITECTURE_DECISIONS.md`.

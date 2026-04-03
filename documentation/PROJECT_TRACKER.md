@@ -135,6 +135,36 @@
 
 ---
 
+## Archived French-model follow-up notes
+
+These notes absorb the older standalone French improvement document so the repo keeps one tracker for both shipped work and deferred follow-up ideas.
+
+The final validated setup stayed conservative because the shipped French pipeline already produced an acceptable cross-batch score with the asymmetric FP penalty. The ideas below are useful only if French performance needs to be revisited after the competition or in a future branch.
+
+### Deferred follow-up sequence
+
+1. Widen French threshold search below `0.50` and retrain to see whether recall gains outweigh FP cost under the competition score.
+2. Profile French false negatives to separate near-threshold misses from users the model is not recognizing at all.
+3. Recalibrate French rules only if they remain inactive on real training folds after re-validation.
+4. Add French-targeted features only if the diagnostic still shows many missed bots with very low model probabilities.
+
+### Deferred ideas worth re-checking
+
+- Lower-bound threshold search for French because the best operating point may sit below the default search floor.
+- One-off diagnostics for missed French bots to inspect probability bands, duplicate behavior, burst patterns, and low-volume accounts.
+- French-specific rule recalibration for repetition and burst combinations if rules show zero useful coverage.
+- Extra French-targeted signals such as stronger periodicity and vocabulary-concentration features if the current feature set is blind to those bots.
+- FR-specific LightGBM tuning only if it improves leave-one-batch-out validation without increasing false positives too much.
+
+### Acceptance guardrails for any future FR changes
+
+- Keep leave-one-batch-out validation as the gate, not evaluation-sample intuition.
+- Accept changes only if French score improves without creating a negative held-out fold.
+- Treat false-positive growth as the main failure mode because of the `-6 * FP` penalty.
+- Leave the English model untouched unless there is separate evidence it regressed.
+
+---
+
 ## Scoring reminder
 
 ```text
