@@ -108,21 +108,34 @@ The current feature extractor focuses on compact user-level signals:
 - Temporal:
   - `mean_time_delta`
   - `std_time_delta`
+  - `interval_variance`
   - `min_time_delta`
   - `max_time_delta`
   - `cv_time_delta`
+  - `periodic_interval_ratio`
+  - `successive_delay_ratio`
+  - `min_rolling_cv`
   - `hour_entropy`
+  - `hour_uniform_chi2`
   - `night_activity_ratio`
   - `tweets_per_hour`
+  - `burst_ratio_1h`
+  - `burst_ratio_extreme`
 - Text behavior:
   - `avg_tweet_length`
   - `std_tweet_length`
   - `type_token_ratio`
   - `unique_words_ratio`
+  - `top10_word_concentration`
+  - `accent_density`
 - Repetition / similarity:
   - `duplicate_tweet_ratio`
   - `avg_similarity_between_tweets`
   - `max_similarity`
+  - `near_duplicate_ratio`
+  - `template_duplicate_ratio`
+  - `template_top_ratio`
+  - `cross_user_repost_ratio`
 - Profile:
   - `username_length`
   - `digit_ratio`
@@ -131,6 +144,8 @@ The current feature extractor focuses on compact user-level signals:
   - `has_description`
 - Activity:
   - `tweet_count`
+  - `observed_post_count`
+  - `tweet_count_gap_ratio`
   - `z_score`
   - `tweet_time_span`
 
@@ -202,10 +217,13 @@ Each file contains one user ID per line.
 - `src/model_training.py` expects labeled training data under `data/training/`.
 - `final_submission.py` expects the actual final drop under `data/final_eval/`.
 - The rules engine is intentionally conservative because of the FP penalty.
+- The current verified thresholds are approximately `0.54` for English and `0.6723` for French.
+- `final_submission.py` also supports `--en-dataset` and `--fr-dataset` overrides for dry runs.
 
 ## Current status
 
 - The codebase is aligned with the real dataset schema.
 - The training and validation scripts run successfully against the current repo layout.
-- The documentation folder now reflects the project plan and architecture.
-- Model quality still needs improvement before final submission, so `documentation/PROJECT_TRACKER.md` remains the source of truth for next steps.
+- The final validated cross-batch results are `188` for English and `80` for French.
+- The current submission path has been dry-run successfully with the saved model artifacts and thresholds.
+- The documentation folder reflects the final shipped approach; rejected experiments are documented in `documentation/ARCHITECTURE_DECISIONS.md`.

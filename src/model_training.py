@@ -420,6 +420,20 @@ def run_final_detection(dataset_path, language: str = "en", model_path=None, thr
     model = bundle["model"]
     print(f"   -> Threshold: {threshold:.2f}")
 
+    extracted_feature_names = [column for column in features_df.columns if column != "user_id"]
+    missing_features = [name for name in feature_names if name not in extracted_feature_names]
+    extra_features = [name for name in extracted_feature_names if name not in feature_names]
+    print(
+        f"   -> Feature schema: extracted={len(extracted_feature_names)} "
+        f"expected={len(feature_names)} missing={len(missing_features)} extra={len(extra_features)}"
+    )
+    if missing_features:
+        preview = ", ".join(missing_features[:5])
+        print(f"   -> Missing features filled with 0: {preview}")
+    if extra_features:
+        preview = ", ".join(extra_features[:5])
+        print(f"   -> Extra features ignored: {preview}")
+
     X = _align_feature_columns(features_df.drop(columns=["user_id"]), feature_names)
     probabilities = model.predict_proba(X)[:, 1]
     preds, rule_flags = apply_safety_layer(X, probabilities, threshold, language=dataset_language)

@@ -29,7 +29,7 @@ def rules_engine(row):
 
     if language == "fr":
         fr_periodic_campaign_rule = (
-            row["periodic_interval_ratio"] >= 0.99
+            row["periodic_interval_ratio"] >= 0.85
             and row["avg_similarity_between_tweets"] <= 0.07
         )
         fr_low_periodicity_volume_rule = (

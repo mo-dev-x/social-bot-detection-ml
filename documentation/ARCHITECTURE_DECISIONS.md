@@ -198,15 +198,28 @@ Do not use any social graph features. Use only per-user behavioral and profile s
 
 ---
 
+## Late-stage validation notes
+
+The following ideas were tested or discussed late in the project and intentionally not shipped in the final detector:
+
+- Weighted-fusion safety layers and probability-adjustment schemes replacing the current `model OR rules` decision.
+- Human-profile veto logic such as "rich profile" exceptions for long bios and high hour entropy.
+- DART-based LightGBM swaps intended to improve generalization.
+- Topic-focus rules or other logic justified primarily by evaluation-sample observations rather than training-fold validation.
+- Redundant French lexical rules that did not increase rule coverage in validation.
+
+These were rejected because they either reduced cross-batch score, introduced recall collapse, or increased leakage risk relative to the validated training setup.
+
+---
+
 ## Decisions under consideration
 
 | Decision | Options | Status |
 |----------|---------|--------|
-| Ensemble across batches | Train one model per batch, vote | Under consideration |
-| Feature selection | Automatic (SHAP), manual pruning | To explore in phase 4 |
-| FR-specific features | FR-specific stopwords, accent features | To explore in phase 4 |
-| Calibration | Platt scaling on probabilities | Low priority |
+| Ensemble across batches | Train one model per batch, vote | Deferred |
+| Feature selection | Automatic (SHAP), manual pruning | Deferred |
+| Calibration | Platt scaling on probabilities | Deferred |
 
 ---
 
-*Last updated: March 30, 2026*
+*Last updated: April 3, 2026*

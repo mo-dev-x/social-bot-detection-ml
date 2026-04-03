@@ -16,7 +16,9 @@ URL_PATTERN = re.compile(r"https?://\S+")
 MENTION_PATTERN = re.compile(r"@\w+")
 HASHTAG_PATTERN = re.compile(r"#\w+")
 NUMBER_PATTERN = re.compile(r"\b\d+\b")
-WORD_PATTERN = re.compile(r"\b[a-zA-ZÀ-ÿ_]+\b")
+WORD_PATTERN = re.compile(r"\b[a-zA-Z\u00C0-\u00FF_]+\b", re.UNICODE)
+ACCENTED_VOWELS = set("\u00E0\u00E2\u00E4\u00E6\u00E8\u00E9\u00EA\u00EB\u00EE\u00EF\u00F4\u0153\u00F9\u00FB\u00FC\u00FF")
+VOWELS = set("aeiouy") | ACCENTED_VOWELS
 
 
 class FeatureExtractor:
@@ -74,11 +76,14 @@ class FeatureExtractor:
             "max_time_delta": 0.0,
             "cv_time_delta": 0.0,
             "periodic_interval_ratio": 0.0,
+            "successive_delay_ratio": 0.0,
+            "min_rolling_cv": 0.0,
             "hour_entropy": 0.0,
             "hour_uniform_chi2": 0.0,
             "night_activity_ratio": 0.0,
             "tweets_per_hour": 0.0,
             "burst_ratio_1h": 0.0,
+            "burst_ratio_extreme": 0.0,
         }
 
         if not timestamps:
@@ -107,8 +112,11 @@ class FeatureExtractor:
         base["max_time_delta"] = float(np.max(deltas))
         base["cv_time_delta"] = safe_divide(base["std_time_delta"], base["mean_time_delta"])
         base["periodic_interval_ratio"] = self._periodic_interval_ratio(deltas)
+        base["successive_delay_ratio"] = self._successive_delay_ratio(deltas)
+        base["min_rolling_cv"] = self._rolling_burst_index(timestamps)
         base["tweets_per_hour"] = safe_divide(len(timestamps), span_seconds / 3600.0)
         base["burst_ratio_1h"] = safe_divide(self._max_tweets_in_window(timestamps, 3600), len(timestamps))
+        base["burst_ratio_extreme"] = self._short_delay_ratio(deltas, threshold_seconds=5.0)
         return base
 
     def _extract_text_features(self, posts, text_authors, text_counts, template_counts):
@@ -128,6 +136,7 @@ class FeatureExtractor:
             "template_top_ratio": 0.0,
             "cross_user_repost_ratio": 0.0,
             "top10_word_concentration": 0.0,
+            "accent_density": 0.0,
         }
 
         if not texts:
@@ -152,6 +161,7 @@ class FeatureExtractor:
         base["duplicate_tweet_ratio"] = 1.0 - safe_divide(len(unique_texts), len(normalized_texts))
         base["template_duplicate_ratio"] = 1.0 - safe_divide(len(template_counter), len(templates))
         base["template_top_ratio"] = safe_divide(max(template_counter.values()), len(templates)) if template_counter else 0.0
+        base["accent_density"] = self._accent_density(texts)
         shared_reposts = 0
         for normalized_text in normalized_texts:
             if not normalized_text:
@@ -251,6 +261,47 @@ class FeatureExtractor:
         residuals = np.mod(deltas, median_delta)
         mirrored = np.minimum(residuals, np.abs(median_delta - residuals))
         return float(np.mean(mirrored <= (0.15 * median_delta)))
+
+    @staticmethod
+    def _short_delay_ratio(deltas: np.ndarray, threshold_seconds: float = 5.0) -> float:
+        if len(deltas) == 0:
+            return 0.0
+        return safe_divide(np.sum(deltas < threshold_seconds), len(deltas))
+
+    @staticmethod
+    def _successive_delay_ratio(deltas: np.ndarray) -> float:
+        if len(deltas) < 5:
+            return 0.0
+        perc_10 = float(np.percentile(deltas, 10))
+        median_delta = float(np.median(deltas))
+        return safe_divide(perc_10, median_delta)
+
+    @staticmethod
+    def _rolling_burst_index(timestamps) -> float:
+        if len(timestamps) < 10:
+            return 0.0
+
+        ts_seconds = np.array([timestamp.timestamp() for timestamp in timestamps], dtype=float)
+        deltas = np.diff(ts_seconds)
+        window_size = 5
+        if len(deltas) < window_size:
+            return 0.0
+
+        rolling_cvs = []
+        for start in range(len(deltas) - window_size + 1):
+            window = deltas[start : start + window_size]
+            window_mean = float(np.mean(window))
+            if window_mean <= 0:
+                continue
+            rolling_cvs.append(float(np.std(window)) / window_mean)
+        return min(rolling_cvs) if rolling_cvs else 1.0
+
+    @staticmethod
+    def _accent_density(texts) -> float:
+        joined_text = " ".join(texts).lower()
+        vowel_count = sum(char in VOWELS for char in joined_text)
+        accented_count = sum(char in ACCENTED_VOWELS for char in joined_text)
+        return safe_divide(accented_count, vowel_count)
 
 
 def create_feature_dataframe(dataset_filepath, language: str = "en"):
