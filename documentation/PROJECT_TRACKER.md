@@ -78,6 +78,8 @@
 - [x] Template similarity and repetition features
 - [x] Hour-of-day distribution features
 - [x] Cross-user repost behavior
+- [x] Topic-focus and batch-coordination features
+- [x] Semantic-consistency and word-length-variance features
 - [x] Accent density for French
 - [x] Successive delay ratio and minimum rolling CV
 
@@ -94,6 +96,7 @@
 
 - [x] Tune thresholds using cross-batch validation
 - [x] Use separate thresholds for English and French
+- [x] Average probabilities across a 3-seed ensemble per language
 - [x] Save the selected thresholds to `models/`
 
 ### Rules engine
@@ -127,10 +130,10 @@
 
 ## Final validated state
 
-- English cross-batch score: `188`
-- French cross-batch score: `80`
-- English threshold artifact: about `0.54`
-- French threshold artifact: about `0.6723`
+- English cross-batch score: `204`
+- French cross-batch score: `118`
+- English threshold artifact: about `0.5388`
+- French threshold artifact: about `0.6673`
 - Submission dry run: completed successfully
 
 ---
@@ -139,7 +142,7 @@
 
 These notes absorb the older standalone French improvement document so the repo keeps one tracker for both shipped work and deferred follow-up ideas.
 
-The final validated setup stayed conservative because the shipped French pipeline already produced an acceptable cross-batch score with the asymmetric FP penalty. The ideas below are useful only if French performance needs to be revisited after the competition or in a future branch.
+The final validated setup kept the conservative safety-layer semantics but promoted the verified ensemble-and-feature improvements because they materially improved both languages under cross-batch validation. The ideas below are useful only if performance needs to be revisited after the competition or in a future branch.
 
 ### Deferred follow-up sequence
 

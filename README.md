@@ -2,7 +2,7 @@
 
 SignalGuard's bot-detection pipeline for the Bot or Not competition.
 
-The project treats bot detection as a user-level classification problem. It aggregates each user's posts into behavioral, repetition, profile, and activity features, trains separate English and French LightGBM models, tunes decision thresholds against the competition metric, and exports submission-ready user ID lists.
+The project treats bot detection as a user-level classification problem. It aggregates each user's posts into behavioral, repetition, profile, and activity features, trains separate English and French LightGBM seed ensembles, tunes decision thresholds against the competition metric, and exports submission-ready user ID lists.
 
 ## What the project optimizes for
 
@@ -93,7 +93,7 @@ The JSON files are expected to contain top-level `users` and `posts` keys.
 1. Load a labeled training batch from `data/training/`.
 2. Group posts by `author_id`.
 3. Build one feature row per user.
-4. Train a LightGBM model per language.
+4. Train a 3-model LightGBM ensemble per language.
 5. Run leave-one-batch-out validation with `GroupKFold`.
 6. Search thresholds using the competition score.
 7. Apply the rules engine as a conservative safety layer.
@@ -126,6 +126,8 @@ The current feature extractor focuses on compact user-level signals:
   - `unique_words_ratio`
   - `top10_word_concentration`
   - `accent_density`
+  - `semantic_consistency`
+  - `word_length_variance`
 - Repetition / similarity:
   - `duplicate_tweet_ratio`
   - `avg_similarity_between_tweets`
@@ -134,6 +136,8 @@ The current feature extractor focuses on compact user-level signals:
   - `template_duplicate_ratio`
   - `template_top_ratio`
   - `cross_user_repost_ratio`
+  - `batch_coordination_score`
+  - `topic_focus_ratio`
 - Profile:
   - `username_length`
   - `digit_ratio`
@@ -211,15 +215,16 @@ Each file contains one user ID per line.
 ## Important implementation notes
 
 - Models are trained separately for English and French.
+- Each saved language model is a 3-seed LightGBM ensemble averaged at inference time.
 - Thresholds are also chosen separately for English and French.
 - `src/model_training.py` expects labeled training data under `data/training/`.
 - `final_submission.py` expects the actual final drop under `data/final_eval/`.
 - The rules engine is intentionally conservative because of the FP penalty.
-- The current verified thresholds are approximately `0.54` for English and `0.6723` for French.
+- The current verified thresholds are approximately `0.5388` for English and `0.6673` for French.
 - `final_submission.py` also supports `--en-dataset` and `--fr-dataset` overrides for dry runs.
 
 ## Current status
 
 - The training and validation scripts run successfully against the current repo layout.
-- The final validated cross-batch results are `188` for English and `80` for French.
+- The final validated cross-batch results are `204` for English and `118` for French.
 - The documentation folder reflects the final shipped approach; rejected experiments are documented in `documentation/ARCHITECTURE_DECISIONS.md`.

@@ -9,11 +9,7 @@ import sys
 
 from src.model_training import run_final_detection, save_submission
 
-# ============================================================================
-# CONFIGURATION: Update this before the final hour.
-# ============================================================================
 TEAM_NAME = "SignalGuard"
-# ============================================================================
 
 
 def _count_submission_ids(filepath: Path) -> int:
@@ -61,8 +57,8 @@ def main() -> int:
     created_files: list[Path] = []
     dataset_dir = Path(args.dataset_dir)
     dataset_overrides = {
-        "en": Path(args.en_dataset) if args.en_dataset else dataset_dir / "final_eval_en.json",
-        "fr": Path(args.fr_dataset) if args.fr_dataset else dataset_dir / "final_eval_fr.json",
+        "en": Path(args.en_dataset) if args.en_dataset else dataset_dir / "dataset.posts&users.30.json",
+        "fr": Path(args.fr_dataset) if args.fr_dataset else dataset_dir / "dataset.posts&users.31.json",
     }
 
     for language, label, dataset_name in [

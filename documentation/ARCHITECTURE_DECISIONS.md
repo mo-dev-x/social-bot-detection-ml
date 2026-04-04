@@ -43,7 +43,7 @@ Use LightGBM (`LGBMClassifier`) as the primary classifier.
 - Handles tabular data natively and efficiently — our feature set is entirely tabular.
 - Outperforms random forest on most tabular benchmarks at this scale.
 - Faster to train than XGBoost with comparable accuracy.
-- `is_unbalance=True` handles class imbalance (bots are a minority) without manual resampling.
+- Uses conservative imbalance handling: the French model applies `class_weight="balanced"` while the English model relies on careful threshold tuning and cross-batch validation.
 - Feature importance is built-in and interpretable — critical for debugging a competition system.
 - Resistant to feature scaling differences (tree-based model, no normalization needed).
 
@@ -73,7 +73,7 @@ Use only behavioral signals and surface-level text statistics. Do not use semant
 
 **Trade-offs:**
 - We may miss bot types that are detectable primarily through linguistic patterns (e.g., bots with a very restricted vocabulary even if timing looks human).
-- `duplicate_tweet_ratio` and `avg_cosine_similarity` are partial text features, but they capture repetition behavior rather than semantics.
+- `duplicate_tweet_ratio` and `avg_similarity_between_tweets` are partial text features, but they capture repetition behavior rather than semantics.
 
 ---
 
@@ -85,15 +85,14 @@ Use only behavioral signals and surface-level text statistics. Do not use semant
 The competition scoring function is `2*TP - 2*FN - 6*FP`. A standard 0.50 decision threshold optimizes accuracy but not this score. The 6× FP penalty means flagging a human is catastrophically worse than missing a bot.
 
 **Decision:**  
-Search decision thresholds from 0.50 to 0.95 and select the one that maximizes the competition score on validation data. Use a high threshold (typically 0.80–0.90+) for the final model.
-
+Search decision thresholds from 0.50 to 0.99 for English, and from 0.30 to 0.99 for French, then select the one that maximizes the competition score on validation data. Use language-specific thresholds chosen from cross-batch out-of-fold predictions.
 **Rationale:**
 - At the default 0.50 threshold, the model flags too many users as bots, generating FPs that destroy the score.
 - The break-even point: flagging an extra user as a bot is only beneficial if `P(bot | flagged) > 6/8 = 0.75`. Below that precision, flagging hurts you.
 - Threshold search is cheap (no retraining required) and directly optimizes the metric we're graded on.
 
 **Trade-offs:**
-- A very high threshold increases false negatives (missed bots). Each FN costs -2 points. We accept missing some bots to avoid the -6 FP penalty.
+- Higher thresholds increase false negatives (missed bots). Each FN costs -2 points. We accept missing some bots to avoid the -6 FP penalty.
 - Threshold tuned on validation may not perfectly transfer to the final eval distribution.
 
 ---
@@ -118,14 +117,42 @@ Add a deterministic rules engine (`src/rules_engine.py`) that runs in parallel w
 - Rules are hand-crafted and may not generalize — thresholds (e.g., `z_score > 2.5`) were set before seeing the data and may need recalibration.
 - The OR combination means rules can introduce FPs even when the ML model correctly scores a user below the threshold. Rules must be conservative enough that their precision is near 100%.
 
-**Rules as of initial implementation:**
+**Rules as of current implementation:**
 ```python
-z_score > 2.5 AND cv_time_delta < 0.4     # high-volume + suspiciously regular timing
-duplicate_tweet_ratio > 0.30               # > 30% identical tweets
-avg_cosine_similarity > 0.90              # near-identical content across tweets
-hour_entropy < 0.25 AND tweets_per_day > 20  # active but only in one hour
-max_tweets_in_10min > 25                   # extreme burst
+duplicate_burst_rule = (
+    near_duplicate_ratio >= 0.50
+    and tweet_count >= 20
+    and burst_ratio_1h >= 0.35
+)
+coordinated_repost_rule = (
+    cross_user_repost_ratio >= 0.60
+    and template_duplicate_ratio >= 0.45
+    and hour_uniform_chi2 >= 18.0
+)
+regularity_rule = (
+    duplicate_tweet_ratio >= 0.45
+    and cv_time_delta <= 0.12
+    and hour_entropy <= 1.2
+    and tweet_count >= 15
+)
+zscore_rule = (
+    z_score >= 2.0
+    and near_duplicate_ratio >= 0.35
+    and tweets_per_hour >= 1.5
+)
+
+# Additional French-specific rules:
+fr_periodic_campaign_rule = (
+    periodic_interval_ratio >= 0.85
+    and avg_similarity_between_tweets <= 0.07
+)
+fr_low_periodicity_volume_rule = (
+    periodic_interval_ratio <= 0.02
+    and tweet_count >= 18
+)
 ```
+
+The current rules engine is intentionally conservative, using extreme combination thresholds rather than broad single-feature cuts.
 
 ---
 
@@ -176,6 +203,27 @@ Use leave-one-batch-out cross-validation (train on N-1 batches, validate on the 
 
 ---
 
+## ADR-007A — Small seed ensembles for score stability
+
+**Status:** Accepted
+
+**Context:**  
+Single LightGBM runs were still producing a few very high-confidence false positives, especially in French. The data is small enough that seed variance matters.
+
+**Decision:**  
+Train a 3-seed LightGBM ensemble per language and average probabilities at validation and inference time.
+
+**Rationale:**
+- Averaging across seeds smooths out unstable tree splits without changing the feature interface or submission workflow.
+- The ensemble improved cross-batch performance in both languages while keeping inference simple.
+- This is a lower-risk stability improvement than changing the safety-layer semantics.
+
+**Trade-offs:**
+- Training and inference are roughly 3x heavier.
+- Saved model artifacts now contain a list of models rather than a single estimator.
+
+---
+
 ## ADR-008 — No social graph features
 
 **Status:** Accepted (forced)
@@ -205,7 +253,7 @@ The following ideas were tested or discussed late in the project and intentional
 - Weighted-fusion safety layers and probability-adjustment schemes replacing the current `model OR rules` decision.
 - Human-profile veto logic such as "rich profile" exceptions for long bios and high hour entropy.
 - DART-based LightGBM swaps intended to improve generalization.
-- Topic-focus rules or other logic justified primarily by evaluation-sample observations rather than training-fold validation.
+- Topic-focus rules justified primarily by evaluation-sample observations rather than training-fold validation.
 - Redundant French lexical rules that did not increase rule coverage in validation.
 
 These were rejected because they either reduced cross-batch score, introduced recall collapse, or increased leakage risk relative to the validated training setup.
@@ -216,7 +264,7 @@ These were rejected because they either reduced cross-batch score, introduced re
 
 | Decision | Options | Status |
 |----------|---------|--------|
-| Ensemble across batches | Train one model per batch, vote | Deferred |
+| Batch-specific ensemble voting | Train one model per batch, vote | Deferred |
 | Feature selection | Automatic (SHAP), manual pruning | Deferred |
 | Calibration | Platt scaling on probabilities | Deferred |
 

@@ -29,21 +29,27 @@ class FeatureExtractor:
         stop_words = "english" if language == "en" else None
         self.tfidf = TfidfVectorizer(max_features=200, lowercase=True, stop_words=stop_words)
 
-    def extract_all_features(self, users, posts):
+    def extract_all_features(self, users, posts, topic_keywords=None):
         posts_by_author = defaultdict(list)
         text_authors = defaultdict(set)
         text_counts = Counter()
         template_counts = Counter()
+        batch_wide_vocab = Counter()
+        topic_keywords = {keyword.lower() for keyword in (topic_keywords or []) if keyword}
 
         for post in posts:
             author_id = post.get("author_id")
+            text = post.get("text", "")
             if author_id:
                 posts_by_author[author_id].append(post)
-                normalized_text = normalize_for_similarity(post.get("text", ""))
+                batch_wide_vocab.update(tokenize_words(text))
+                normalized_text = normalize_for_similarity(text)
                 if normalized_text:
                     text_authors[normalized_text].add(author_id)
                     text_counts[normalized_text] += 1
-                    template_counts[self._normalize_template(post.get("text", ""))] += 1
+                    template_counts[self._normalize_template(text)] += 1
+
+        top_batch_words = {word for word, _ in batch_wide_vocab.most_common(50)}
 
         rows = []
         for user in tqdm(users, desc=f"Extracting user features ({self.language.upper()})"):
@@ -54,7 +60,16 @@ class FeatureExtractor:
 
             row = {"user_id": user_id}
             row.update(self._extract_temporal_features(author_posts))
-            row.update(self._extract_text_features(author_posts, text_authors, text_counts, template_counts))
+            row.update(
+                self._extract_text_features(
+                    author_posts,
+                    text_authors,
+                    text_counts,
+                    template_counts,
+                    top_batch_words=top_batch_words,
+                    topic_keywords=topic_keywords,
+                )
+            )
             row.update(self._extract_profile_features(user))
             row.update(self._extract_activity_features(user, author_posts))
             rows.append(row)
@@ -119,7 +134,7 @@ class FeatureExtractor:
         base["burst_ratio_extreme"] = self._short_delay_ratio(deltas, threshold_seconds=5.0)
         return base
 
-    def _extract_text_features(self, posts, text_authors, text_counts, template_counts):
+    def _extract_text_features(self, posts, text_authors, text_counts, template_counts, top_batch_words=None, topic_keywords=None):
         texts = [post.get("text", "") for post in posts]
         texts = [text for text in texts if text]
 
@@ -137,6 +152,10 @@ class FeatureExtractor:
             "cross_user_repost_ratio": 0.0,
             "top10_word_concentration": 0.0,
             "accent_density": 0.0,
+            "semantic_consistency": 0.0,
+            "word_length_variance": 0.0,
+            "batch_coordination_score": 0.0,
+            "topic_focus_ratio": 0.0,
         }
 
         if not texts:
@@ -155,6 +174,8 @@ class FeatureExtractor:
         base["std_tweet_length"] = float(np.std(tweet_lengths))
         base["type_token_ratio"] = safe_divide(len(unique_tokens), len(all_tokens))
         base["unique_words_ratio"] = safe_divide(len(unique_tokens), len(texts))
+        base["semantic_consistency"] = self._semantic_consistency(texts)
+        base["word_length_variance"] = self._word_length_variance(texts)
         if len(all_tokens) >= 20:
             top10_count = sum(count for _, count in Counter(all_tokens).most_common(10))
             base["top10_word_concentration"] = safe_divide(top10_count, len(all_tokens))
@@ -162,6 +183,8 @@ class FeatureExtractor:
         base["template_duplicate_ratio"] = 1.0 - safe_divide(len(template_counter), len(templates))
         base["template_top_ratio"] = safe_divide(max(template_counter.values()), len(templates)) if template_counter else 0.0
         base["accent_density"] = self._accent_density(texts)
+        base["batch_coordination_score"] = self._batch_coordination_score(unique_tokens, top_batch_words or set())
+        base["topic_focus_ratio"] = self._topic_focus_ratio(texts, topic_keywords or set())
         shared_reposts = 0
         for normalized_text in normalized_texts:
             if not normalized_text:
@@ -303,12 +326,53 @@ class FeatureExtractor:
         accented_count = sum(char in ACCENTED_VOWELS for char in joined_text)
         return safe_divide(accented_count, vowel_count)
 
+    @staticmethod
+    def _semantic_consistency(texts) -> float:
+        if not texts:
+            return 0.0
+        all_text = "".join(texts)
+        if not all_text:
+            return 0.0
+        special_chars = len(re.findall(r"[^\w\s]", all_text, flags=re.UNICODE))
+        return safe_divide(special_chars, len(all_text))
+
+    @staticmethod
+    def _word_length_variance(texts) -> float:
+        words = " ".join(texts).split()
+        if len(words) < 5:
+            return 0.0
+        lengths = [len(word) for word in words]
+        return float(np.std(lengths))
+
+    @staticmethod
+    def _batch_coordination_score(user_tokens, top_batch_words) -> float:
+        if not user_tokens:
+            return 0.0
+        return safe_divide(len(set(user_tokens) & set(top_batch_words)), len(set(user_tokens)))
+
+    @staticmethod
+    def _topic_focus_ratio(texts, topic_keywords) -> float:
+        if not texts or not topic_keywords:
+            return 0.0
+        normalized_keywords = {keyword.lower() for keyword in topic_keywords if keyword}
+        if not normalized_keywords:
+            return 0.0
+        matches = 0
+        for text in texts:
+            lowered = text.lower()
+            if any(keyword in lowered for keyword in normalized_keywords):
+                matches += 1
+        return safe_divide(matches, len(texts))
+
 
 def create_feature_dataframe(dataset_filepath, language: str = "en"):
     """Load a dataset JSON file and convert it into user-level features."""
     data = load_json_dataset(dataset_filepath)
     extractor = FeatureExtractor(language=language or data.get("lang", "en"))
-    return extractor.extract_all_features(data["users"], data["posts"])
+    topic_keywords = []
+    for topic in data.get("metadata", {}).get("topics", []):
+        topic_keywords.extend(topic.get("keywords", []))
+    return extractor.extract_all_features(data["users"], data["posts"], topic_keywords=topic_keywords)
 
 
 __all__ = ["FeatureExtractor", "create_feature_dataframe", "load_json_dataset"]

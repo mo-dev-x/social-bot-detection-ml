@@ -44,40 +44,59 @@ def compute_competition_score(y_true, y_pred):
     }
 
 
-def train_lightgbm_model(X_train, y_train, language: str = "multi"):
-    """Train the base classifier with conservative defaults."""
-    logger.info("Training LightGBM model for %s", language.upper())
+def _build_lgbm_params(language: str = "multi", seed: int = 42, feature_fraction: float | None = None):
     if language == "fr":
-        model = lgb.LGBMClassifier(
-            n_estimators=160,
-            learning_rate=0.05,
-            num_leaves=24,
-            min_child_samples=15,
-            min_split_gain=0.05,
-            reg_lambda=2.0,
-            subsample=0.85,
-            colsample_bytree=0.85,
-            class_weight="balanced",
-            random_state=42,
-            verbose=-1,
-            n_jobs=-1,
-        )
+        params = {
+            "n_estimators": 160,
+            "learning_rate": 0.05,
+            "num_leaves": 24,
+            "min_child_samples": 15,
+            "min_split_gain": 0.05,
+            "reg_lambda": 2.0,
+            "subsample": 0.85,
+            "colsample_bytree": 0.85,
+            "class_weight": "balanced",
+        }
     else:
-        model = lgb.LGBMClassifier(
-            n_estimators=180,
-            learning_rate=0.05,
-            num_leaves=31,
-            min_child_samples=25,
-            min_split_gain=0.05,
-            reg_lambda=1.5,
-            subsample=0.9,
-            colsample_bytree=0.9,
-            random_state=42,
-            verbose=-1,
-            n_jobs=-1,
-        )
+        params = {
+            "n_estimators": 180,
+            "learning_rate": 0.05,
+            "num_leaves": 31,
+            "min_child_samples": 25,
+            "min_split_gain": 0.05,
+            "reg_lambda": 1.5,
+            "subsample": 0.9,
+            "colsample_bytree": 0.9,
+        }
+    if feature_fraction is not None:
+        params["colsample_bytree"] = feature_fraction
+    params.update({"random_state": seed, "verbose": -1, "n_jobs": -1})
+    return params
+
+
+def train_lightgbm_model(X_train, y_train, language: str = "multi", seed: int = 42, feature_fraction: float | None = None):
+    """Train one LightGBM classifier with conservative defaults."""
+    logger.info("Training LightGBM model for %s (seed=%s)", language.upper(), seed)
+    model = lgb.LGBMClassifier(**_build_lgbm_params(language=language, seed=seed, feature_fraction=feature_fraction))
     model.fit(X_train, y_train)
     return model
+
+
+def train_lightgbm_ensemble(X_train, y_train, language: str = "multi", seeds=None):
+    """Train a small seed ensemble for more stable probabilities."""
+    seeds = seeds or [42, 777, 2026]
+    models = []
+    for seed in seeds:
+        models.append(train_lightgbm_model(X_train, y_train, language=language, seed=seed, feature_fraction=0.8))
+    return models
+
+
+def predict_probabilities(model_or_models, X):
+    """Predict probabilities from either a single model or a list of models."""
+    if isinstance(model_or_models, list):
+        probabilities = [model.predict_proba(X)[:, 1] for model in model_or_models]
+        return np.mean(probabilities, axis=0)
+    return model_or_models.predict_proba(X)[:, 1]
 
 
 def apply_safety_layer(features_df, probabilities, threshold, language: str | None = None):
@@ -123,7 +142,7 @@ def find_best_threshold(y_true, y_probs, feature_frame, language: str = "en"):
 
 def validate_model(model, X_val, y_val, threshold: float = 0.85, feature_frame=None):
     """Score the model using the conservative safety layer."""
-    probabilities = model.predict_proba(X_val)[:, 1]
+    probabilities = predict_probabilities(model, X_val)
     if feature_frame is None:
         raise ValueError("feature_frame is required for safety-layer validation.")
 
@@ -144,8 +163,12 @@ def validate_model(model, X_val, y_val, threshold: float = 0.85, feature_frame=N
 
 def analyze_feature_importance(model, X_train):
     """Return ranked feature importance."""
+    if isinstance(model, list):
+        importances = np.mean([member.feature_importances_ for member in model], axis=0)
+    else:
+        importances = model.feature_importances_
     feature_importance_df = pd.DataFrame(
-        {"feature": X_train.columns, "importance": model.feature_importances_}
+        {"feature": X_train.columns, "importance": importances}
     ).sort_values("importance", ascending=False)
     print("\n=== TOP FEATURES ===")
     print(feature_importance_df.head(15))
@@ -246,8 +269,8 @@ def _cross_batch_validate(X, y, groups, feature_frame, language):
         print(f"Train batches: {train_groups}")
         print(f"Validate batches: {val_groups}")
 
-        model = train_lightgbm_model(X.iloc[train_idx], y.iloc[train_idx], language=language)
-        probs = model.predict_proba(X.iloc[val_idx])[:, 1]
+        model = train_lightgbm_ensemble(X.iloc[train_idx], y.iloc[train_idx], language=language)
+        probs = predict_probabilities(model, X.iloc[val_idx])
         oof_probs[val_idx] = probs
 
         threshold, _ = find_best_threshold(
@@ -332,7 +355,7 @@ def train_full_pipeline(dataset_path=None, ground_truth_path=None, language: str
     )
 
     print("\n5. Training final model on all labeled users")
-    model = train_lightgbm_model(X, y, language=language)
+    model = train_lightgbm_ensemble(X, y, language=language)
     feature_importance = analyze_feature_importance(model, X)
 
     target_dir = ensure_directory(models_dir)
@@ -341,6 +364,7 @@ def train_full_pipeline(dataset_path=None, ground_truth_path=None, language: str
         "feature_names": feature_columns,
         "language": language,
         "batches": sorted(training_df["batch_id"].unique().tolist()),
+        "ensemble_seeds": [42, 777, 2026],
     }
 
     model_path = target_dir / f"model_{language}.pkl"
@@ -435,7 +459,7 @@ def run_final_detection(dataset_path, language: str = "en", model_path=None, thr
         print(f"   -> Extra features ignored: {preview}")
 
     X = _align_feature_columns(features_df.drop(columns=["user_id"]), feature_names)
-    probabilities = model.predict_proba(X)[:, 1]
+    probabilities = predict_probabilities(model, X)
     preds, rule_flags = apply_safety_layer(X, probabilities, threshold, language=dataset_language)
     flagged_users = features_df.loc[preds == 1, "user_id"].tolist()
 
