@@ -68,6 +68,11 @@ These are out-of-fold cross-validation results from the reports committed in [`m
 
 Score on each held-out batch: English 62 / 84 / 58, French 28 / 46 / 50. Every fold scores positive, so the models carry over to batches they did not see. On its own, the rules engine flags only 1 English and 9 French accounts (with 1 and 0 false positives); it is a safety net, not the main detector.
 
+<p align="center">
+  <img src="assets/cv-per-fold.png" alt="Grouped bar chart of precision and recall on each held-out batch for the English and French models, with the competition score per fold" width="800">
+</p>
+<p align="center"><sub>Plotted from the committed <code>models/training_report_en.json</code> and <code>models/training_report_fr.json</code> (leave-one-batch-out CV, model + rules). The trained <code>.pkl</code> models are not in the repo, so no feature-importance plot is shown.</sub></p>
+
 Full per-fold and threshold details are in [`models/training_report_en.json`](models/training_report_en.json) and [`models/training_report_fr.json`](models/training_report_fr.json).
 
 ## Quickstart
