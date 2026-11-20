@@ -1,4 +1,24 @@
-# Bot or Not: Social Bot Detection
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo.svg" alt="Bot or Not: Social Bot Detection" height="120">
+  </picture>
+</p>
+
+<p align="center">
+  <img alt="Python 3.11" src="https://img.shields.io/badge/python-3.11-3776AB?logo=python&amp;logoColor=white">
+  <a href="https://github.com/mo-dev-x/social-bot-detection-ml/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/mo-dev-x/social-bot-detection-ml"></a>
+  <img alt="Top language" src="https://img.shields.io/github/languages/top/mo-dev-x/social-bot-detection-ml">
+</p>
+
+<p align="center">
+  <a href="#the-problem">The problem</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#results">Results</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#project-structure">Project structure</a> ·
+  <a href="#limitations-and-next-steps">Limitations</a>
+</p>
 
 A behavior-based pipeline that classifies social media accounts as bots or humans, using per-language LightGBM ensembles tuned for a scoring rule that punishes false positives three times harder than misses.
 
@@ -59,7 +79,8 @@ There are 42 numeric features per user. Features with near-zero variance are dro
 
 ## Results
 
-These are out-of-fold cross-validation results from the reports committed in [`models/`](models/), with the model and rules combined. They are not final leaderboard numbers.
+> [!NOTE]
+> These are out-of-fold cross-validation results from the reports committed in [`models/`](models/), with the model and rules combined. They are not final leaderboard numbers.
 
 | Language | Users | Bots | Score | Precision | Recall | False positives | Threshold |
 |---|---|---|---|---|---|---|---|
@@ -77,7 +98,8 @@ Full per-fold and threshold details are in [`models/training_report_en.json`](mo
 
 ## Quickstart
 
-Requires **Python 3.11**. The pinned versions (`numpy==1.24.3`, `pandas==2.0.3`) do not install on Python 3.12 or newer.
+> [!IMPORTANT]
+> Requires **Python 3.11**. The pinned versions (`numpy==1.24.3`, `pandas==2.0.3`) do not install on Python 3.12 or newer.
 
 ```bash
 git clone https://github.com/mo-dev-x/social-bot-detection-ml.git
@@ -91,7 +113,10 @@ python test_comprehensive.py     # environment and pipeline checks (runs without
 
 ### Data
 
-The competition datasets are **not included** (`data/` is gitignored). Put them here:
+> [!NOTE]
+> The competition datasets are **not included** (`data/` is gitignored).
+
+Put them here:
 
 ```text
 data/
@@ -122,7 +147,10 @@ python final_submission.py \
   --fr-dataset data/final_eval/final_eval_fr.json
 ```
 
-This writes `submissions/SignalGuard.detections.en.txt` and `.fr.txt`, with one flagged user ID per line. Use `--team-name` to change the prefix. Pass the dataset paths explicitly: without them, the script looks for `dataset.posts&users.30.json` and `.31.json` inside `--dataset-dir`.
+This writes `submissions/SignalGuard.detections.en.txt` and `.fr.txt`, with one flagged user ID per line. Use `--team-name` to change the prefix.
+
+> [!TIP]
+> Pass the dataset paths explicitly: without them, the script looks for `dataset.posts&users.30.json` and `.31.json` inside `--dataset-dir`.
 
 To run one dataset on its own:
 
@@ -155,7 +183,10 @@ The design reasoning, including the approaches that were tried and rejected, is 
 
 ## Tests
 
-`test_comprehensive.py` and `test_everything.py` are plain scripts, not a pytest suite. Without data, they check imports, rule logic and the submission file format, and they skip the steps that need data or models. With `data/training/` present, they also run feature extraction end to end.
+> [!NOTE]
+> `test_comprehensive.py` and `test_everything.py` are plain scripts, not a pytest suite.
+
+Without data, they check imports, rule logic and the submission file format, and they skip the steps that need data or models. With `data/training/` present, they also run feature extraction end to end.
 
 ## Limitations and next steps
 

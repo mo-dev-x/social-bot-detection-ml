@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 72" width="320" height="72" role="img" aria-label="Bot or Not">
+  <title>Bot or Not</title>
+  <desc>A shield with a check mark, beside the Bot or Not wordmark.</desc>
+  <path d="M36 6 L60 14.5 V35 C60 50.5 50 61 36 67 C22 61 12 50.5 12 35 V14.5 Z" fill="#f3f4f6" stroke="#1f2937" stroke-width="3.5" stroke-linejoin="round"/>
+  <path d="M36 6 V67" stroke="#1f2937" stroke-width="1.5" opacity="0.25"/>
+  <polyline points="24,37 32.5,45.5 48,28" fill="none" stroke="#c2410c" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="80" y="47" font-family="-apple-system, &quot;Segoe UI&quot;, Roboto, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="-0.5" fill="#1f2937">Bot or <tspan fill="#c2410c">Not</tspan></text>
+</svg>
