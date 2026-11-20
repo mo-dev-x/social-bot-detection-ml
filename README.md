@@ -2,7 +2,7 @@
 
 A behavior-based pipeline that classifies social media accounts as bots or humans, using per-language LightGBM ensembles tuned for a scoring rule that punishes false positives three times harder than misses.
 
-**Top 10 in Québec** in the Bot or Not competition (team SignalGuard, April 2026).
+**10th of 25 on the French detector leaderboard** of the Bot or Not competition (March 2026). Built solo, competing as SignalGuard.
 
 ## The problem
 
@@ -163,6 +163,10 @@ The design reasoning, including the approaches that were tried and rejected, is 
 - **Not reproducible without the competition data**, which this repo cannot redistribute.
 - **`models/training_report_global.json` is out of date.** It comes from an earlier single-model setup (batches 30 and 31, older paths) and does not describe the shipped pipeline.
 - Ideas deferred in the tracker: SHAP-based feature selection, probability calibration (Platt scaling), one model per batch with voting, and a lower threshold floor for French.
+
+## Author
+
+Built solo by [Mohamed El Yazid El Yaakoubi](https://github.com/mo-dev-x).
 
 ## License
 
