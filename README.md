@@ -1,230 +1,164 @@
-# Social Bot Detection ML
+# Bot or Not: Social Bot Detection
 
-SignalGuard's bot-detection pipeline for the Bot or Not competition.
+A behavior-based pipeline that classifies social media accounts as bots or humans, using per-language LightGBM ensembles tuned for a scoring rule that punishes false positives three times harder than misses.
 
-The project treats bot detection as a user-level classification problem. It aggregates each user's posts into behavioral, repetition, profile, and activity features, trains separate English and French LightGBM seed ensembles, tunes decision thresholds against the competition metric, and exports submission-ready user ID lists.
+**Top 10 in Québec** in the Bot or Not competition (team SignalGuard, April 2026).
 
-## What the project optimizes for
+## The problem
 
-- User-level detection, not tweet-level classification
-- Behavioral signal over semantic NLP
-- Very low false positives because the scoring rule is asymmetric
-- Separate English and French models
-- Cross-batch validation instead of random within-batch splits
-
-The competition score is:
+Each competition batch is a JSON dump of accounts and their posts, in English or French. The goal is to submit the list of user IDs that are bots. Submissions are scored as:
 
 ```text
 score = 2 * TP - 2 * FN - 6 * FP
 ```
 
-That makes false positives much more expensive than missed bots, so the pipeline is intentionally conservative.
+Flagging one human costs as much as missing three bots, so flagging an account only pays off when the model is more than 75% sure it is a bot (6 / (2 + 6)). The dataset has no follower graph, likes or retweets, so everything has to come from posting behavior and the profile.
 
-## Repository structure
+The approach:
 
-```text
-.
-|-- src/
-|   |-- feature_extraction.py
-|   |-- model_training.py
-|   |-- detector.py
-|   |-- rules_engine.py
-|   `-- utils.py
-|-- documentation/
-|   |-- ARCHITECTURE_DECISIONS.md
-|   `-- PROJECT_TRACKER.md
-|-- data/
-|   |-- training/
-|   |-- evaluation_samples/
-|   `-- final_eval/
-|-- models/
-|-- submissions/
-|-- feature_extraction.py
-|-- model_training.py
-|-- final_submission.py
-|-- test_everything.py
-|-- test_comprehensive.py
-`-- requirements.txt
+- **User-level classification.** All of an account's posts are combined into one feature row. A single post says little; the pattern across dozens of posts gives the bot away.
+- **Behavior over meaning.** Timing, bursts, repetition and templating are much harder for a bot to fake than natural-sounding text. The project uses no embeddings, sentiment or topic models.
+- **One model per language.** English and French get separate models, hyperparameters and thresholds.
+- **Thresholds chosen for the competition score.** Decision thresholds are picked to maximize the score on out-of-fold predictions, not set at 0.5.
+
+## How it works
+
+```mermaid
+flowchart LR
+    A["dataset.posts&users.N.json<br/>users + posts"] --> B["FeatureExtractor<br/>42 user-level features"]
+    B --> C["3-seed LightGBM ensemble<br/>(per language)"]
+    C --> D{"mean probability<br/>>= tuned threshold?"}
+    B --> E["Rules engine<br/>(extreme multi-signal cases)"]
+    D -- yes --> F["Flag as bot"]
+    E -- match --> F
+    F --> G["TEAM.detections.{en,fr}.txt"]
 ```
 
-The `src/` package is the source of truth. Root-level Python files are convenience entry points.
+### Features (`src/feature_extraction.py`)
 
-## Documentation
+There are 42 numeric features per user. Features with near-zero variance are dropped automatically before training; `tweet_count_gap_ratio` was dropped this way in the final run.
 
-The project docs are linked here for quick access:
+| Group | Features |
+|---|---|
+| Timing (15) | mean / std / min / max / variance / coefficient of variation of time between posts, `periodic_interval_ratio`, `successive_delay_ratio`, `min_rolling_cv`, `hour_entropy`, `hour_uniform_chi2`, `night_activity_ratio`, `tweets_per_hour`, `burst_ratio_1h`, `burst_ratio_extreme` |
+| Text statistics (8) | `avg_tweet_length`, `std_tweet_length`, `type_token_ratio`, `unique_words_ratio`, `top10_word_concentration`, `accent_density`, `semantic_consistency`, `word_length_variance` |
+| Repetition and coordination (9) | `duplicate_tweet_ratio`, TF-IDF cosine `avg_similarity_between_tweets` / `max_similarity`, `near_duplicate_ratio`, `template_duplicate_ratio`, `template_top_ratio`, `cross_user_repost_ratio`, `batch_coordination_score`, `topic_focus_ratio` |
+| Profile (5) | `username_length`, `digit_ratio`, `username_entropy`, `bio_length`, `has_description` |
+| Activity (5) | `tweet_count`, `observed_post_count`, `tweet_count_gap_ratio`, `z_score`, `tweet_time_span` |
 
-- [Architecture decisions](documentation/ARCHITECTURE_DECISIONS.md) records the architectural choices behind the approach.
-- [Project tracker](documentation/PROJECT_TRACKER.md) tracks progress, validation phases, remaining competition work, and archived French-model follow-up notes.
+### Model (`src/model_training.py`)
 
-If you want the repo narrative first, start there before reading the code.
+- `LGBMClassifier` with small, regularized trees: 180 estimators for English and 160 for French, a learning rate of 0.05, and L2 regularization. The French model uses `class_weight="balanced"`.
+- Each language model is a **3-seed ensemble** (seeds 42, 777, 2026) whose probabilities are averaged. This reduced the few very confident false positives that single runs produced.
+- A **rules engine** (`src/rules_engine.py`) also flags accounts with extreme combinations of signals, such as near-duplicate posts plus heavy bursts, or coordinated reposts plus templated text. An account is flagged if the model **or** a rule flags it. The rules are deliberately strict so they add almost no false positives.
 
-## Data layout
+### Evaluation
 
-The repository now uses `data/` as the single home for datasets:
+- **Leave-one-batch-out cross-validation** uses `GroupKFold` grouped by batch. English trains on batches 1, 3 and 5; French trains on 2, 4 and 6. Each fold tests on a batch the model has never seen, which is the situation the final evaluation batch creates.
+- The threshold is searched over 140 values (from 0.50 to 0.99 for English, 0.30 to 0.99 for French) on the out-of-fold probabilities, using the competition score as the objective.
+
+## Results
+
+These are out-of-fold cross-validation results from the reports committed in [`models/`](models/), with the model and rules combined. They are not final leaderboard numbers.
+
+| Language | Users | Bots | Score | Precision | Recall | False positives | Threshold |
+|---|---|---|---|---|---|---|---|
+| English | 945 | 158 | **204** | 94.7% | 89.9% | 8 | 0.539 |
+| French | 626 | 83 | **118** | 97.4% | 89.2% | 2 | 0.667 |
+
+Score on each held-out batch: English 62 / 84 / 58, French 28 / 46 / 50. Every fold scores positive, so the models carry over to batches they did not see. On its own, the rules engine flags only 1 English and 9 French accounts (with 1 and 0 false positives); it is a safety net, not the main detector.
+
+Full per-fold and threshold details are in [`models/training_report_en.json`](models/training_report_en.json) and [`models/training_report_fr.json`](models/training_report_fr.json).
+
+## Quickstart
+
+Requires **Python 3.11**. The pinned versions (`numpy==1.24.3`, `pandas==2.0.3`) do not install on Python 3.12 or newer.
+
+```bash
+git clone https://github.com/mo-dev-x/social-bot-detection-ml.git
+cd social-bot-detection-ml
+python3.11 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+python test_comprehensive.py     # environment and pipeline checks (runs without data)
+```
+
+### Data
+
+The competition datasets are **not included** (`data/` is gitignored). Put them here:
 
 ```text
 data/
-|-- training/
-|   |-- dataset.posts&users.1.json
-|   |-- dataset.bots.1.txt
-|   |-- ...
-|   |-- dataset.posts&users.6.json
-|   `-- dataset.bots.6.txt
-|-- evaluation_samples/
-|   |-- dataset.posts&users.30.json
-|   |-- dataset.bots.30.txt
-|   |-- dataset.posts&users.31.json
-|   `-- dataset.bots.31.txt
-`-- final_eval/
-    |-- final_eval_en.json
-    `-- final_eval_fr.json
+├── training/              # labeled batches 1-6
+│   ├── dataset.posts&users.1.json
+│   ├── dataset.bots.1.txt
+│   └── ...
+├── evaluation_samples/    # optional extra labeled samples (batches 30, 31)
+└── final_eval/            # unlabeled final drop
 ```
 
-Notes:
+Each JSON file has top-level `users` and `posts` keys. Posts link to users through `author_id`. Each `dataset.bots.N.txt` lists one bot user ID per line.
 
-- `data/training/` contains the labeled competition training batches used for model training.
-- `data/evaluation_samples/` contains additional labeled sample evaluation-style datasets you can use for experiments or sanity checks.
-- `data/final_eval/` is reserved for the real final drop during the submission window.
-
-The JSON files are expected to contain top-level `users` and `posts` keys.
-
-## Current model pipeline
-
-1. Load a labeled training batch from `data/training/`.
-2. Group posts by `author_id`.
-3. Build one feature row per user.
-4. Train a 3-model LightGBM ensemble per language.
-5. Run leave-one-batch-out validation with `GroupKFold`.
-6. Search thresholds using the competition score.
-7. Apply the rules engine as a conservative safety layer.
-8. Save trained models and thresholds to `models/`.
-
-## Feature groups
-
-The current feature extractor focuses on compact user-level signals:
-
-- Temporal:
-  - `mean_time_delta`
-  - `std_time_delta`
-  - `interval_variance`
-  - `min_time_delta`
-  - `max_time_delta`
-  - `cv_time_delta`
-  - `periodic_interval_ratio`
-  - `successive_delay_ratio`
-  - `min_rolling_cv`
-  - `hour_entropy`
-  - `hour_uniform_chi2`
-  - `night_activity_ratio`
-  - `tweets_per_hour`
-  - `burst_ratio_1h`
-  - `burst_ratio_extreme`
-- Text behavior:
-  - `avg_tweet_length`
-  - `std_tweet_length`
-  - `type_token_ratio`
-  - `unique_words_ratio`
-  - `top10_word_concentration`
-  - `accent_density`
-  - `semantic_consistency`
-  - `word_length_variance`
-- Repetition / similarity:
-  - `duplicate_tweet_ratio`
-  - `avg_similarity_between_tweets`
-  - `max_similarity`
-  - `near_duplicate_ratio`
-  - `template_duplicate_ratio`
-  - `template_top_ratio`
-  - `cross_user_repost_ratio`
-  - `batch_coordination_score`
-  - `topic_focus_ratio`
-- Profile:
-  - `username_length`
-  - `digit_ratio`
-  - `username_entropy`
-  - `bio_length`
-  - `has_description`
-- Activity:
-  - `tweet_count`
-  - `observed_post_count`
-  - `tweet_count_gap_ratio`
-  - `z_score`
-  - `tweet_time_span`
-
-## Training
-
-Install dependencies:
+### Train
 
 ```bash
-pip install -r requirements.txt
+python test_everything.py        # checks that the data loads and features build
+python model_training.py         # trains EN and FR models
 ```
 
-Run the lightweight smoke test:
+This writes `models/model_{en,fr}.pkl`, `models/threshold_{en,fr}.pkl` and `models/training_report_{en,fr}.json`.
+
+### Detect
 
 ```bash
-python test_everything.py
+python final_submission.py \
+  --en-dataset data/final_eval/final_eval_en.json \
+  --fr-dataset data/final_eval/final_eval_fr.json
 ```
 
-Run the broader validation suite:
+This writes `submissions/SignalGuard.detections.en.txt` and `.fr.txt`, with one flagged user ID per line. Use `--team-name` to change the prefix. Pass the dataset paths explicitly: without them, the script looks for `dataset.posts&users.30.json` and `.31.json` inside `--dataset-dir`.
+
+To run one dataset on its own:
 
 ```bash
-python test_comprehensive.py
+python -m src.detector path/to/dataset.json submissions/out.txt --language fr --team-name demo
 ```
 
-Train both language-specific models:
-
-```bash
-python model_training.py
-```
-
-This writes artifacts such as:
+## Project structure
 
 ```text
-models/model_en.pkl
-models/threshold_en.pkl
-models/training_report_en.json
-models/model_fr.pkl
-models/threshold_fr.pkl
-models/training_report_fr.json
+.
+├── src/
+│   ├── feature_extraction.py   # FeatureExtractor: users + posts -> 42 features per user
+│   ├── model_training.py       # training, GroupKFold CV, threshold search, inference
+│   ├── rules_engine.py         # conservative rule-based safety layer
+│   ├── detector.py             # CLI for a single dataset
+│   └── utils.py                # loading, tokenizing, entropy, timestamp helpers
+├── models/                     # training reports (*.json); trained *.pkl are gitignored
+├── documentation/
+│   ├── ARCHITECTURE_DECISIONS.md   # ADRs: why user-level, why LightGBM, why no NLP, ...
+│   └── PROJECT_TRACKER.md          # phase-by-phase progress and deferred ideas
+├── model_training.py           # entry point: train both languages
+├── final_submission.py         # entry point: generate submission files
+├── feature_extraction.py       # re-exports from src/
+├── test_everything.py          # quick data-readiness check
+└── test_comprehensive.py       # 8-step environment and pipeline check
 ```
 
-## Final submission flow
+The design reasoning, including the approaches that were tried and rejected, is in [ARCHITECTURE_DECISIONS.md](documentation/ARCHITECTURE_DECISIONS.md).
 
-When the final evaluation files arrive, place them in:
+## Tests
 
-```text
-data/final_eval/final_eval_en.json
-data/final_eval/final_eval_fr.json
-```
+`test_comprehensive.py` and `test_everything.py` are plain scripts, not a pytest suite. Without data, they check imports, rule logic and the submission file format, and they skip the steps that need data or models. With `data/training/` present, they also run feature extraction end to end.
 
-Then run:
+## Limitations and next steps
 
-```bash
-python final_submission.py
-```
+- **Small validation set.** There are only 3 labeled batches per language, so each language has 3 cross-validation folds. Estimates are noisy, and the organizers said the final batch would include some new bot strategies.
+- **Not reproducible without the competition data**, which this repo cannot redistribute.
+- **`models/training_report_global.json` is out of date.** It comes from an earlier single-model setup (batches 30 and 31, older paths) and does not describe the shipped pipeline.
+- Ideas deferred in the tracker: SHAP-based feature selection, probability calibration (Platt scaling), one model per batch with voting, and a lower threshold floor for French.
 
-Submission files are written to:
+## License
 
-```text
-submissions/TEAM_NAME.detections.en.txt
-submissions/TEAM_NAME.detections.fr.txt
-```
-
-Each file contains one user ID per line.
-
-## Important implementation notes
-
-- Models are trained separately for English and French.
-- Each saved language model is a 3-seed LightGBM ensemble averaged at inference time.
-- Thresholds are also chosen separately for English and French.
-- `src/model_training.py` expects labeled training data under `data/training/`.
-- `final_submission.py` expects the actual final drop under `data/final_eval/`.
-- The rules engine is intentionally conservative because of the FP penalty.
-- The current verified thresholds are approximately `0.5388` for English and `0.6673` for French.
-- `final_submission.py` also supports `--en-dataset` and `--fr-dataset` overrides for dry runs.
-
-## Current status
-
-- The training and validation scripts run successfully against the current repo layout.
-- The final validated cross-batch results are `204` for English and `118` for French.
-- The documentation folder reflects the final shipped approach; rejected experiments are documented in `documentation/ARCHITECTURE_DECISIONS.md`.
+No license has been chosen yet.
