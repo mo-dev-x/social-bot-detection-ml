@@ -201,4 +201,4 @@ Built solo by [Mohamed El Yazid El Yaakoubi](https://github.com/mo-dev-x).
 
 ## License
 
-No license has been chosen yet.
+Released under the [MIT License](LICENSE).
