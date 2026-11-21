@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 72" width="320" height="72" role="img" aria-label="Bot or Not">
+  <title>Bot or Not</title>
+  <desc>A shield with a check mark, beside the Bot or Not wordmark.</desc>
+  <defs>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.6"/></filter>
+  </defs>
+  <style>
+    .check { stroke-dasharray: 37; stroke-dashoffset: 0; animation: draw 1.3s cubic-bezier(0.65, 0, 0.35, 1) 0.3s both; }
+    .glow { opacity: 0; animation: glow 6s ease-in-out 1.8s infinite; }
+    @keyframes draw { from { stroke-dashoffset: 37; } to { stroke-dashoffset: 0; } }
+    @keyframes glow {
+      0%, 60%, 100% { opacity: 0; }
+      25% { opacity: 0.45; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style>
+  <path d="M36 6 L60 14.5 V35 C60 50.5 50 61 36 67 C22 61 12 50.5 12 35 V14.5 Z" fill="#f3f4f6" stroke="#1f2937" stroke-width="3.5" stroke-linejoin="round"/>
+  <path d="M36 6 V67" stroke="#1f2937" stroke-width="1.5" opacity="0.25"/>
+  <polyline class="glow" points="24,37 32.5,45.5 48,28" fill="none" stroke="#c2410c" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" filter="url(#soft)"/>
+  <polyline class="check" points="24,37 32.5,45.5 48,28" fill="none" stroke="#c2410c" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="80" y="47" font-family="-apple-system, &quot;Segoe UI&quot;, Roboto, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="-0.5" fill="#1f2937">Bot or <tspan fill="#c2410c">Not</tspan></text>
+</svg>

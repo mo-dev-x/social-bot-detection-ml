@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo.svg" alt="Bot or Not: Social Bot Detection" height="120">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-animated-dark.svg">
+    <img src="assets/logo-animated.svg" alt="Bot or Not: Social Bot Detection" height="120">
   </picture>
 </p>
 
@@ -18,6 +18,13 @@
   <a href="#quickstart">Quickstart</a> ·
   <a href="#project-structure">Project structure</a> ·
   <a href="#limitations-and-next-steps">Limitations</a>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/divider-dark.svg">
+    <img src="assets/divider.svg" alt="" width="100%" height="12">
+  </picture>
 </p>
 
 A behavior-based pipeline that classifies social media accounts as bots or humans, using per-language LightGBM ensembles tuned for a scoring rule that punishes false positives three times harder than misses.
